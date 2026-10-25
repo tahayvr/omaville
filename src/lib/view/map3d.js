@@ -13,9 +13,10 @@ import { createFx3d } from "./fx3d.js";
 
 const PZ = 12; // deck height of the raised platforms
 const deg = Math.PI / 180;
-// the home view: from the south-west and a low eye, so the arcology on the inner west stroke stands nearest and the city
-// rises behind it; framed on the mark (model.sky, less its margin), the quarter's rings run off the edges
-const HOME_AZ = 162 * deg, HOME_EL = 24 * deg, SKY_MARGIN = 60;
+// the home view: from azimuth 72 and a low eye, the direction the billboards' and patrons' screens are drawn to face
+// (the first recording, city.js), so every screen faces the viewer; framed on the mark (model.sky, less its
+// margin), the quarter's rings run off the edges
+const HOME_AZ = 72 * deg, HOME_EL = 24 * deg, SKY_MARGIN = 60;
 let PUFF = null; // the steam's sprite texture: one for the page
 const puffTex = () => PUFF ??= (() => { const c = document.createElement("canvas"); c.width = c.height = 64; const x = c.getContext("2d"); const gr = x.createRadialGradient(32, 32, 2, 32, 32, 30); gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(1, "rgba(255,255,255,0)"); x.fillStyle = gr; x.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c); })();
 
