@@ -7,7 +7,8 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { buildScene, retheme } from "./scene3d.js";
+import { buildScene, retheme, replaceIn } from "./scene3d.js";
+import { riseNow, withRise, RISE } from "./batch3d.js";
 import { SMALL_PARTS, edgeAlpha } from "../city/lod.js";
 import { createFx3d } from "./fx3d.js";
 
@@ -20,7 +21,7 @@ const HOME_AZ = 72 * deg, HOME_EL = 24 * deg, SKY_MARGIN = 60;
 let PUFF = null; // the steam's sprite texture: one for the page
 const puffTex = () => PUFF ??= (() => { const c = document.createElement("canvas"); c.width = c.height = 64; const x = c.getContext("2d"); const gr = x.createRadialGradient(32, 32, 2, 32, 32, 30); gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(1, "rgba(255,255,255,0)"); x.fillStyle = gr; x.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c); })();
 
-export function createMap({ container, recA, recB, model, theme = "light", still = false, timeZone = "UTC" }) {
+export function createMap({ container, prep, model, theme = "light", still = false, timeZone = "UTC" }) { // prep: the city's prepared geometry (view/scene3d.js prepare(), from the worker)
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -56,13 +57,13 @@ export function createMap({ container, recA, recB, model, theme = "light", still
   const fx = createFx3d({ group: world, palette: () => city.pal, pulse: () => city?.pulsePts }); // live effects: short-lived, never part of the city
   function mount(t) {
     if (city) { world.remove(city.root); city.root.traverse((o) => { o.geometry?.dispose(); if (o.material?.map) o.material.map.dispose(); }); }
-    city = buildScene(recA, recB, t, { onAsset: () => touch() });
+    city = buildScene(null, null, t, { prep, onAsset: () => touch() }); prep = null; // its arrays now live in the scene's layers
     world.add(city.root);
     scene.background = new THREE.Color(city.pal.bg);
     scene.fog = new THREE.Fog(city.pal.bg, 1800 - 250, 1800 + (t === "dark" ? 1100 : 1300)); // the far rings fade into the page: depth, and the camera keeps its distance from the target
     hemi.groundColor.set(t === "dark" ? 0x101010 : 0x9a9a94);
     applyClock();
-    lit = new Set();
+    lit = new Set(); overlays.clear();
     world.updateMatrixWorld(true);
     bounds = new THREE.Box3().setFromObject(city.root);
     // a thinned cloud of the city's vertices: fitting the view to it hugs the real silhouette
@@ -93,23 +94,32 @@ export function createMap({ container, recA, recB, model, theme = "light", still
     fragmentShader: "uniform sampler2D baseTexture; uniform sampler2D bloomTexture; varying vec2 vUv; void main() { gl_FragColor = texture2D(baseTexture, vUv) + texture2D(bloomTexture, vUv); }",
   }), "baseTexture"); mixPass.needsSwap = true;
   finalComposer.addPass(new RenderPass(scene, camera)); finalComposer.addPass(mixPass); finalComposer.addPass(new OutputPass());
-  const black = new THREE.MeshBasicMaterial({ color: 0 });
-  const swapped = [], blackBg = new THREE.Color(0);
+  // black for the bloom pass: the batched layers' rises, plain meshes and instanced ones each their own, so no object
+  // asks for a different shader than the one before it (three.js would look its program up again, every frame)
+  const black = withRise(new THREE.MeshBasicMaterial({ color: 0 })), blackPlain = new THREE.MeshBasicMaterial({ color: 0 }), blackInst = new THREE.MeshBasicMaterial({ color: 0 });
+  const swapped = [], shrunk = new Map(), blackBg = new THREE.Color(0);
+  const BLOOM_RES = 0.5; // the glow is a blur: drawn at half the pixels each way, a quarter of the bloom pass's cost
   function darken() { // everything that does not bloom goes black (opaque solids) or away (the transparent, the textured, the sprites)
     scene.traverse((o) => {
-      if (!o.material || o.userData.bloom || !o.visible) return;
+      if (!o.material || !o.visible) return;
+      if (o.userData.bloom) { // a dot's size is in the screen's pixels, whatever the target: in the smaller bloom target, smaller
+        if (o.isPoints && !shrunk.has(o.material)) { shrunk.set(o.material, o.material.size); o.material.size *= BLOOM_RES; }
+        return;
+      }
       const m = o.material;
       if (o.isSprite || o.isLine || o.isPoints || m.transparent || m.map) { swapped.push([o, null]); o.visible = false; return; } // lines and dots occlude nothing worth a draw call
-      swapped.push([o, m]); o.material = black;
+      swapped.push([o, m]); o.material = o.userData.layer ? black : o.isInstancedMesh ? blackInst : blackPlain;
     });
   }
-  function restoreAll() { for (const [o, m] of swapped) { if (m) o.material = m; else o.visible = true; } swapped.length = 0; }
+  function restoreAll() { for (const [o, m] of swapped) { if (m) o.material = m; else o.visible = true; } swapped.length = 0; for (const [m, size] of shrunk) m.size = size; shrunk.clear(); }
   function render() {
     if (themeName !== "dark") { renderer.render(scene, camera); return; }
-    const bg = scene.background, fog = scene.fog;
-    scene.background = blackBg; scene.fog = null; darken();
+    // the bloom pass sees the glow on black: the fog turns black rather than going away, so the glowing materials keep
+    // the shader they draw with in the final pass (a scene without fog would need another, swapped in twice a frame)
+    const bg = scene.background, fogColor = scene.fog?.color.getHex();
+    scene.background = blackBg; scene.fog?.color.set(0); darken();
     bloomComposer.render();
-    restoreAll(); scene.background = bg; scene.fog = fog;
+    restoreAll(); scene.background = bg; scene.fog?.color.set(fogColor);
     finalComposer.render();
   }
   const controls = new OrbitControls(camera, renderer.domElement);
@@ -214,29 +224,54 @@ export function createMap({ container, recA, recB, model, theme = "light", still
     for (const id of next) if (!lit.has(id)) paint(id, true);
     lit = next; touch();
   }
+  const overlays = new Map(); // a lit station's edges and lines, a crisp accent copy over the batched ones (which fade with the far view)
   function paint(id, on) {
     const s = city.stations.get(id); if (!s) return;
-    const pal = city.pal, accent = new THREE.Color(pal.accent);
-    for (const m of s.faces) {
+    const pal = city.pal, accent = new THREE.Color(pal.accent), k = themeName === "dark" ? 0.3 : 0.18;
+    for (const name of ["faces", "facesSmall"]) city.layers[name].tint(id, on ? (c) => c.lerp(accent, k) : null);
+    const had = overlays.get(id); if (had) { city.root.remove(had); had.geometry.dispose(); overlays.delete(id); }
+    if (on) {
+      const parts = ["edges", "edgesSmall", "lines", "neon"].map((n) => city.layers[n].positions(id)).filter(Boolean), n = parts.reduce((t, a) => t + a.length, 0);
+      if (n) { const pos = new Float32Array(n); let at = 0; for (const a of parts) { pos.set(a, at); at += a.length; } const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(pos, 3)); const o = new THREE.LineSegments(g, city.mats.litEdge); o.userData = { lit: id }; city.root.add(o); overlays.set(id, o); }
+    }
+    for (const m of s.meshes) {
       if (m.userData.kind === "screen") continue; // a screen keeps its picture; its frame and lines light up
       if (on) { m.userData.base ??= m.material; const mat = litFace.clone(); mat.color.copy(m.userData.base.color).lerp(accent, themeName === "dark" ? 0.18 : 0.12); mat.emissive.copy(accent).multiplyScalar(themeName === "dark" ? 0.12 : 0.03); m.material = mat; }
       else if (m.userData.base) { m.material.dispose(); m.material = m.userData.base; }
     }
-    for (const e of s.edges) e.material = on ? city.mats.litEdge : city.mats.edge;
-    for (const l of s.lines) l.material = on ? city.mats.litEdge : l.userData.bloom ? city.mats.neon : city.mats.line;
   }
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
-  let pickables = [];
+  let screens = [], boxed = []; // the screens (objects of their own), and the stations with their bounds in world space
+  const hits = [], at3 = new THREE.Vector3();
   let lodZoom = 0, lodList = null; // level of detail (below): what to show at this zoom, and the objects that care
-  function refreshPickables() { lodList = null; pickables = []; for (const [id, s] of city.stations) if (!id.startsWith("cell:")) pickables.push(...s.faces); } // a cell's scenery is not a station
+  function refreshPickables() { // a cell's scenery is not a station
+    lodList = null; screens = []; boxed = [];
+    for (const [id, s] of city.stations) {
+      if (id.startsWith("cell:")) continue;
+      screens.push(...s.meshes.filter((m) => m.userData.kind === "screen"));
+      if (!s.boxAll.isEmpty()) boxed.push([id, s.boxAll.clone().applyMatrix4(world.matrixWorld)]);
+    }
+  }
   function pick(clientX, clientY) {
     const r = renderer.domElement.getBoundingClientRect();
     ndc.set(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
     ray.setFromCamera(ndc, camera);
-    const hit = ray.intersectObjects(pickables, false)[0];
-    if (!hit) return null;
-    const { station, role } = hit.object.userData;
-    if (!station) return null;
+    let best = null;
+    const sh = ray.intersectObjects(screens, false)[0]; if (sh) best = { d: sh.distance, station: sh.object.userData.station, role: "" };
+    const cands = [];
+    for (const [id, box] of boxed) { const p = ray.ray.intersectBox(box, at3); if (p) cands.push([p.distanceTo(ray.ray.origin), id]); }
+    cands.sort((a, b) => a[0] - b[0]);
+    for (const [d, id] of cands) {
+      if (best && d > best.d) break; // nothing nearer can be behind this box's front face
+      for (const name of ["faces", "facesSmall"]) {
+        if (name === "facesSmall" && camera.zoom < SMALL_PARTS) continue;
+        const L = city.layers[name]; hits.length = 0;
+        const r = L.raycast(id, ray, hits); if (!r) continue;
+        for (const h of hits) if (!best || h.distance < best.d) best = { d: h.distance, station: id, role: L.roleAt(r, h.face.a) };
+      }
+    }
+    if (!best) return null;
+    const { station, role } = best;
     if (/^day-\d+$/.test(station)) return { kind: "day", id: +station.slice(4) };
     return { kind: "station", id: station, role: role || "station" };
   }
@@ -439,17 +474,38 @@ export function createMap({ container, recA, recB, model, theme = "light", still
   }
   function pixelBudget() {
     const w = container.clientWidth || 1, h = container.clientHeight || 1;
-    const pr = Math.max(1, Math.min(2, window.devicePixelRatio || 1, Math.sqrt(8.3e6 / (w * h))));
-    renderer.setPixelRatio(pr); finalComposer.setPixelRatio(pr); bloomComposer.setPixelRatio(pr);
+    const pr = Math.max(0.75, quality * Math.max(1, Math.min(2, window.devicePixelRatio || 1, Math.sqrt(8.3e6 / (w * h)))));
+    if (pr === budget) return; budget = pr;
+    renderer.setPixelRatio(pr); finalComposer.setPixelRatio(pr); bloomComposer.setPixelRatio(pr * BLOOM_RES);
+  }
+  // adaptive resolution: a GPU that cannot keep up at this size draws fewer pixels (the city is fill-bound: a retina
+  // window is millions of them, twice over in the dark theme), and takes them back once it has room again. Judged by
+  // the median of a second of back-to-back frames, so a one-off stall on the main thread (a redraw) does not count;
+  // it steps down at once and up only after several smooth seconds, and a step up that has to be taken back at once
+  // sets the ceiling for this visit.
+  let quality = 1, ceiling = 1, qGood = 0, sinceUp = Infinity, budget = 0;
+  const qTimes = [];
+  function adapt(ms) {
+    if (ms > 250) { qTimes.length = 0; return; } // the loop slept: not a frame time
+    qTimes.push(ms);
+    if (qTimes.length < 60) return;
+    const median = qTimes.sort((x, y) => x - y)[30]; qTimes.length = 0; sinceUp++;
+    const step = (q) => { quality = q; qGood = 0; const w = container.clientWidth || 1, h = container.clientHeight || 1; pixelBudget(); renderer.setSize(w, h, false); finalComposer.setSize(w, h); bloomComposer.setSize(w, h); };
+    if (median > 21 && quality > 0.5) { const q = Math.max(0.5, quality * 0.85); if (sinceUp < 4) ceiling = q; step(q); }
+    else if (median < 17.5 && quality < ceiling) { if (++qGood >= 6) { step(Math.min(ceiling, quality / 0.85)); sinceUp = 0; } }
+    else qGood = 0;
   }
 
   // ---- loop ----
   // the idle loop: with motion on, the city animates every frame; with reduced motion nothing moves on its own, so
   // the loop sleeps until something changes (the camera, an effect, a morph, a highlight) and touch() wakes it
-  let dirty = true, raf = 0, last = 0, running = false;
+  let dirty = true, raf = 0, last = 0, running = false, riseUntil = 0; // riseUntil: the batched layers rise until then (seconds on riseNow's clock)
+  const nowS = () => performance.now() / 1000;
   function touch() { dirty = true; if (running && !raf) { last = 0; raf = requestAnimationFrame(frame); } }
   function frame(now) {
+    if (last) adapt(now - last);
     const dt = last ? Math.min((now - last) / 1000, 1 / 20) : 1 / 60; last = now;
+    riseNow.value = nowS();
     const flying = stepFly(now);
     const moved = controls.update(dt);
     if (!still) animate(dt);
@@ -459,7 +515,7 @@ export function createMap({ container, recA, recB, model, theme = "light", still
     render();
     api.onFrame?.(dt);
     for (const f of frameTaps) f(); // a clip copies the frame right after it rendered
-    const keep = !still || flying || moved || fx.busy || morphs.length > 0 || dirty;
+    const keep = !still || flying || moved || fx.busy || morphs.length > 0 || riseNow.value < riseUntil || dirty;
     dirty = false;
     raf = keep ? requestAnimationFrame(frame) : 0;
   }
@@ -484,25 +540,19 @@ export function createMap({ container, recA, recB, model, theme = "light", still
     setLit, pick, boxesOf,
     // in place: swap these stations for their new drawing (fragments of the two 3D records, city/stations.js);
     // the rest of the city, the camera and the movers stay as they are
-    replaceStations(fragsA, fragsB, cells = []) { // cells: the claimed cells ("cell:i,j", "cell:apps:5") whose stand-ins go
-      const fresh = new Set(Object.keys(fragsA).filter((id) => !city.stations.has(id)));
-      const ids = new Set([...Object.keys(fragsA), ...cells]), keepLit = [...lit].filter((id) => ids.has(id));
+    replaceStations(drawn, part, cells = []) { // drawn: the stations redrawn; part: their prepared geometry; cells: the claimed cells ("cell:i,j", "cell:apps:5") whose stand-ins go
+      const fresh = new Set(drawn.filter((id) => !city.stations.has(id)));
+      const ids = new Set([...drawn, ...cells]), keepLit = [...lit].filter((id) => ids.has(id));
       keepLit.forEach((id) => paint(id, false));
-      const gone = [];
-      city.root.traverse((o) => { if (o !== city.root && ids.has(o.userData?.station)) gone.push(o); });
-      for (const o of gone) { o.parent?.remove(o); o.geometry?.dispose(); if (o.material?.map) { o.material.map.dispose(); o.material.dispose(); } }
-      for (const id of ids) city.stations.delete(id);
-      city.texts = city.texts.filter((t) => !ids.has(t.userData.station));
-      const wrap = (f) => Object.values(f).flat().join("");
-      const part = buildScene(wrap(fragsA), wrap(fragsB), themeName, { mats: city.mats, onAsset: () => touch() });
-      const added = [];
-      for (const child of [...part.root.children]) { if (child === part.ram) continue; city.root.add(child); added.push(child); }
-      // the morph: a redrawn station settles into its new height; a new one rises from the ground
-      if (!still) for (const o of added) { const id = o.userData?.station; morphs.push({ o, t: 0, from: fresh.has(id) ? 0.04 : 0.94 }); o.scale.z = fresh.has(id) ? 0.04 : 0.94; }
-      if (part.ram.children.length) { city.root.remove(city.ram); city.ram = part.ram; city.root.add(part.ram); }
-      for (const [id, st] of part.stations) city.stations.set(id, st);
-      city.texts.push(...part.texts);
-      if (!city.pulsePts && part.pulsePts) city.pulsePts = part.pulsePts;
+      const { added } = replaceIn(city, part, ids, themeName, { onAsset: () => touch() });
+      // the morph: a redrawn station settles into its new height; a new one rises from the ground (the batched layers
+      // in their shaders, its objects of their own by their scale)
+      if (!still) {
+        const t0 = (riseNow.value = nowS());
+        for (const id of drawn) for (const L of Object.values(city.layers)) L.rise(id, t0, fresh.has(id) ? 0.04 : 0.94);
+        riseUntil = Math.max(riseUntil, t0 + RISE + 0.1);
+        for (const o of added) { const id = o.userData?.station; morphs.push({ o, t: 0, from: fresh.has(id) ? 0.04 : 0.94 }); o.scale.z = fresh.has(id) ? 0.04 : 0.94; }
+      }
       world.updateMatrixWorld(true);
       refreshPickables(); keepLit.forEach((id) => { lit.delete(id); }); setLit([...lit, ...keepLit]);
       touch();
@@ -511,11 +561,15 @@ export function createMap({ container, recA, recB, model, theme = "light", still
     // the mark and scenery first
     arrive(order, ms = 3000) {
       if (still) return;
-      city.root.traverse((o) => {
-        if (o === city.root || o.parent !== city.root) return;
-        const id = o.userData?.station, d = id && order.has(id) ? order.get(id) : id?.startsWith("cell:") ? 0.08 : 0.02;
+      const delay = (id) => (id && order.has(id) ? order.get(id) : id?.startsWith("cell:") ? 0.08 : 0.02);
+      const t0 = (riseNow.value = nowS()), span = ms / 1000;
+      for (const L of Object.values(city.layers)) L.riseAll((id) => [t0 + delay(id) * span, 0.02]);
+      riseUntil = t0 + span + RISE + 0.1;
+      for (const o of city.root.children) { // the objects of their own rise by their scale, at their station's moment
+        if (o.userData?.layer || o.userData?.lit) continue;
+        const d = delay(o.userData?.station);
         o.scale.z = 0.02; morphs.push({ o, t: -(d * ms) / 700, from: 0.02 });
-      });
+      }
       touch();
     },
     // clips: run f after each frame renders; returns the way to stop (keeps the loop awake meanwhile)
@@ -556,6 +610,7 @@ export function createMap({ container, recA, recB, model, theme = "light", still
     stop() { running = false; cancelAnimationFrame(raf); raf = 0; last = 0; },
   };
   mount(theme);
+  if (import.meta.env?.DEV) api._debug = { scene, camera, renderer, render, get city() { return city; } }; // for measuring while developing
   setInterval(() => { if (!clockAt) { applyClock(); touch(); } }, 60000); // the sun moves on
   setFrustum();
   return api;

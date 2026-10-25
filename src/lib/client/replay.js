@@ -19,14 +19,21 @@ export function createReplay({ getData, patch, setClock = () => {}, fx = () => {
   const toV = (t) => { const [a, b] = span(); return Math.round(((t - a) / (b - a)) * 1000); };
   const tell = () => onChange({ open, playing, value: toV(at), label, speed: speeds[speed][0] });
 
-  // one redraw at a time; while one runs, only the latest wanted moment is kept
+  // one redraw at a time, at most four a second (a station that changes in consecutive moments is drawn once); while
+  // one runs or waits, only the latest wanted moment is kept. The clock and the label follow every frame.
+  const GAP = 250;
+  let drawnAt = 0;
   async function show(t) {
-    want = t; if (busy) return;
+    want = t; label = fmt(t, timeZone); tell(); setClock(new Date(t * 1000));
+    if (busy) return;
     busy = true;
     while (want !== null) {
+      const wait = drawnAt + GAP - performance.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      if (want === null) break; // stopped while waiting
       const target = want; want = null;
       const next = dataAt(getData(), target), prev = shown ?? getData(), ch = changedBetween(prev, next);
-      shown = next; label = fmt(target, timeZone); tell(); setClock(new Date(target * 1000));
+      shown = next; drawnAt = performance.now();
       if (ch.repos.length || ch.days.length) await patch(next, stationsFor(ch.repos, ch.days));
     }
     busy = false;

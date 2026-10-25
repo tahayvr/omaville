@@ -41,7 +41,14 @@ export class CityUI {
     const s = load("ow-crew-sort", "c30"); if (["c30", "c7", "name"].includes(s)) this.crewSort = s;
   }
   setModel(M) { this.model = M; this.L = lens(M); this.rev++; }
-  changed() { this.rev++; } // the model was merged in place
+  // the model was merged in place: the chrome follows at most four times a second (a replay patches many times a
+  // second, and the cards and lists recompute on every rev); the first change after a quiet spell shows at once
+  #at = 0; #queued = 0;
+  changed() {
+    const wait = this.#at + 250 - performance.now();
+    if (wait <= 0) { this.#at = performance.now(); this.rev++; return; }
+    this.#queued ||= setTimeout(() => { this.#queued = 0; this.#at = performance.now(); this.rev++; }, wait);
+  }
   fold(name, on) {
     this.folded[name] = on; if (name === "detail" && on) this.wantOverview = false;
     keep("ow-folded", $state.snapshot(this.folded));

@@ -51,6 +51,19 @@ for (const az of [72, 252]) {
   console.log(`3d record ${az}: ${solids} solids, ${(rec.svg.length / 1e6).toFixed(2)} MB, ${Math.round(performance.now() - t)} ms${bad ? `, ${bad} bad values` : ""}`);
   if (bad) process.exitCode = 1;
 }
+// the builder worker prepares both recordings into the map's geometry (view/scene3d.js prepare(), client/worker.js):
+// it must run without a DOM and give finite numbers, for the whole city and for a few stations redrawn in place
+{
+  const { three } = await import("../src/lib/client/worker.js");
+  const input = { data, layout, config }, some = Object.keys(data.repos).slice(0, 6);
+  for (const [what, ids] of [["city", null], [`${some.length} stations`, some]]) {
+    const t = performance.now(), { prep } = three(input, ids);
+    let n = 0, bad = 0;
+    for (const m of Object.values(prep.pieces)) for (const p of m.values()) { for (const v of p.pos) { n++; if (!Number.isFinite(v)) bad++; } }
+    console.log(`3d prepare (${what}): ${(n / 3 / 1e6).toFixed(2)}M vertices, ${Math.round(performance.now() - t)} ms${bad ? `, ${bad} bad values` : ""}`);
+    if (bad || !n) process.exitCode = 1;
+  }
+}
 // in place: every repository's drawing slices out of the city as whole groups that carry their own position, so
 // a station rebuilt from new data lands where the full build would draw it (src/lib/city/stations.js)
 {

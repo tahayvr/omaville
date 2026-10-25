@@ -1,9 +1,10 @@
-// Turns the 3D record from city.js (three: true) into a three.js scene: merged meshes per station,
-// crisp edge lines, window panes, signs as text planes, plus handles for everything that moves.
+// Turns the 3D record from city.js (three: true) into a three.js scene: the stations' parts batched in layers
+// (batch3d.js), crisp edge lines, window panes, signs as text planes, plus handles for everything that moves.
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { roundedPlan } from "../city/kit/iso-kit.mjs";
 import { SMALL_PARTS, SIGN_PX, PLATE_PX } from "../city/lod.js";
+import { Layer, withRise } from "./batch3d.js";
 
 
 const RE = /<g\b([^>]*)>|<\/g>|<path\b([^>]*?)\/?>|<text\b([^>]*)>([^<]*)<\/text>|<image\b([^>]*?)\/?>/g;
@@ -210,34 +211,78 @@ export function parseRecord(svg, { panesOnly = false } = {}) {
 }
 
 // ---------- build ----------
-export function buildScene(recA, recB, theme = "light", { mats: shared = null, onAsset = () => {} } = {}) { // onAsset: an image arrived (redraw) // shared: a partial rebuild reuses the scene's materials
-  const pal = PALETTE[theme];
-  const A = parseRecord(recA), B = recB ? parseRecord(recB, { panesOnly: true }) : { panes: [], texts: [], images: [] };
-  const root = new THREE.Group(); root.name = "city";
-  const stations = new Map(); // id → { faces: Mesh[], edges: LineSegments[], lines: LineSegments[], box: Box3 }
-  const st = (id) => { if (!stations.has(id)) stations.set(id, { faces: [], edges: [], lines: [], box: new THREE.Box3(), boxAll: new THREE.Box3() }); return stations.get(id); };
-  const mats = shared ?? {
-    face: Object.fromEntries(Object.entries(pal.face).map(([k, c]) => [k, new THREE.MeshLambertMaterial({ color: c, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })])),
-    material: {}, // named materials, made as the record asks for them
-    edge: new THREE.LineBasicMaterial({ color: pal.edge }),
-    line: new THREE.LineBasicMaterial({ vertexColors: true }),
-    neon: new THREE.LineBasicMaterial({ vertexColors: true }), // the neon lines, apart: they bloom and never fade with the edges
-    pane: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }),
+// The station parts go into batched layers (view/batch3d.js): faces, small parts, edges, lines, neon, panes, lamps and
+// pulsing lamps, a few draw calls each however many stations there are. Signs, screens, logos, the press's ram and the
+// ground's polygons stay objects of their own.
+const SMALL = new Set(["worker", "pallet", "rack", "belt"]); // small parts: shown once they are a few pixels tall (lod.js)
+export const LAYERS = ["faces", "facesSmall", "edges", "edgesSmall", "lines", "neon", "panes", "dots", "pulse"];
+
+// the colour a layer's piece takes from a palette: "face:<tone>", "mat:<material>:<tone>", "edge", "pulse", or tintOf's keys
+function colorFor(pal, key) {
+  const [kind, a, b] = key.split(":");
+  if (kind === "face") return pal.face[a] ?? pal.face.hi;
+  if (kind === "mat") return pal.materials?.[a] ?? pal.face[b] ?? pal.face.hi; // a palette that does not name the material (dark): the face tone
+  if (kind === "edge") return pal.edge;
+  if (kind === "pulse") return pal.live;
+  return tintOf(pal, key);
+}
+
+function makeMaterials(pal) {
+  return {
+    face: Object.fromEntries(Object.entries(pal.face).map(([k, c]) => [k, new THREE.MeshLambertMaterial({ color: c, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })])), // the ram's own meshes
+    material: {},
+    faces: withRise(new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })),
+    edge: withRise(new THREE.LineBasicMaterial({ vertexColors: true })),
+    line: withRise(new THREE.LineBasicMaterial({ vertexColors: true })),
+    neon: withRise(new THREE.LineBasicMaterial({ vertexColors: true })), // the neon lines, apart: they bloom and never fade with the edges
+    pane: withRise(new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 })),
+    dot: withRise(new THREE.PointsMaterial({ vertexColors: true, size: 2.5, sizeAttenuation: false, map: roundDot(), alphaTest: 0.5 })),
+    pulse: withRise(new THREE.PointsMaterial({ color: pal.live, size: 4, sizeAttenuation: false, transparent: true, map: roundDot(), depthWrite: false })),
+    plainEdge: new THREE.LineBasicMaterial({ color: pal.edge }), // the ram's edges
     litFace: new THREE.MeshLambertMaterial({ color: pal.accent, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false }),
     litEdge: new THREE.LineBasicMaterial({ color: pal.accent }),
     holo: new THREE.MeshBasicMaterial({ color: pal.holo, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }),
     mouth: new THREE.MeshBasicMaterial({ color: pal.mouth, side: THREE.DoubleSide }),
     ground: new THREE.MeshBasicMaterial({ color: pal.ground, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 }),
     road: new THREE.MeshBasicMaterial({ color: pal.road, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
-    dot: new THREE.PointsMaterial({ vertexColors: true, size: 2.5, sizeAttenuation: false, map: roundDot(), alphaTest: 0.5 }),
-    pulse: new THREE.PointsMaterial({ color: pal.live, size: 4, sizeAttenuation: false, transparent: true, map: roundDot(), depthWrite: false }),
     screenUniforms: { uTime: { value: 0 } }, // the screens' clock (map3d.js advances it)
   };
-  const col = new THREE.Color();
-  const moved = (pts, tr) => pts.map((p) => [p[0] + tr[0], p[1] + tr[1], p[2] + tr[2]]);
-  const ram = new THREE.Group(); ram.name = "ram";
+}
 
-  // solids, grouped by station + role + tone; edges from the same geometry
+function makeLayers(root, mats, pal) {
+  const colorOf = (key) => colorFor(pal, key);
+  const L = (name, kind, material, extra = {}) => new Layer(name, { kind, material, parent: root, colorOf, ...extra });
+  return {
+    faces: L("faces", "mesh", mats.faces, { normals: true }),
+    facesSmall: L("facesSmall", "mesh", mats.faces, { normals: true, userData: { minZoom: SMALL_PARTS } }),
+    edges: L("edges", "lines", mats.edge),
+    edgesSmall: L("edgesSmall", "lines", mats.edge, { userData: { minZoom: SMALL_PARTS } }),
+    lines: L("lines", "lines", mats.line),
+    neon: L("neon", "lines", mats.neon, { userData: { bloom: true } }),
+    panes: L("panes", "mesh", mats.pane, { userData: { bloom: true } }),
+    dots: L("dots", "points", mats.dot),
+    pulse: L("pulse", "points", mats.pulse, { userData: { bloom: true } }),
+  };
+}
+
+// The build runs in two steps. prepare() turns the two records into geometry: every station's faces, edges, lines,
+// panes and lamps as one packed array per layer, its bounds, and the raw parts of the objects of its own. It has no
+// theme and no DOM, so the builder worker runs it (client/worker.js) and only typed arrays cross to the page.
+// assemble() makes the objects of their own on the page (signs need a canvas, screens and logos a theme).
+const box6 = () => [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+const grow = (b, bb) => { b[0] = Math.min(b[0], bb.min.x); b[1] = Math.min(b[1], bb.min.y); b[2] = Math.min(b[2], bb.min.z); b[3] = Math.max(b[3], bb.max.x); b[4] = Math.max(b[4], bb.max.y); b[5] = Math.max(b[5], bb.max.z); };
+const flatPos = (pts) => { const pos = []; for (let i = 1; i < pts.length - 1; i++) pos.push(...pts[0], ...pts[i], ...pts[i + 1]); return new Float32Array(pos); };
+
+export function prepare(recA, recB) {
+  const A = parseRecord(recA), B = recB ? parseRecord(recB, { panesOnly: true }) : { panes: [], texts: [], images: [] };
+  const lists = Object.fromEntries(LAYERS.map((l) => [l, new Map()]));
+  const bounds = new Map(); // id → { box, all }: [minx, miny, minz, maxx, maxy, maxz]; box leaves out the small parts
+  const st = (id) => { if (!bounds.has(id)) bounds.set(id, { box: box6(), all: box6() }); return bounds.get(id); };
+  const put = (layer, id, piece) => { const m = lists[layer], k = id ?? ""; if (!m.has(k)) m.set(k, []); m.get(k).push(piece); if (id) st(id); };
+  const ram = [], polys = [], flat = new Map();
+  const moved = (pts, tr) => pts.map((p) => [p[0] + tr[0], p[1] + tr[1], p[2] + tr[2]]);
+
+  // solids, merged per station + role + tone + material; their edges from the same geometry
   const buckets = new Map();
   for (const x of A.solids) {
     const g = solidGeometry(x.s); if (!g) continue;
@@ -248,125 +293,176 @@ export function buildScene(recA, recB, theme = "light", { mats: shared = null, o
   }
   for (const [k, list] of buckets) {
     const [id, role, tone, part, material] = k.split("|");
-    const geo = mergeGeometries(list, false); list.forEach((g) => g.dispose());
+    const geo = list.length === 1 ? list[0] : mergeGeometries(list, false); if (list.length > 1) list.forEach((g) => g.dispose());
     geo.computeBoundingBox();
-    // a named material (brick, steel, leaf…) has its own colour where the palette names it; elsewhere (the dark theme) the face tone stands
-    const named = material && pal.materials?.[material] != null;
-    if (named && !mats.material[material]) mats.material[material] = new THREE.MeshLambertMaterial({ color: pal.materials[material], side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
-    const mesh = new THREE.Mesh(geo, named ? mats.material[material] : mats.face[tone] || mats.face.hi);
-    mesh.userData.material = material; mesh.userData.tone = tone;
-    // level of detail (map3d applies it): workers, pallets, racks and belts appear once they are a few pixels tall
-    const lod = role === "worker" || role === "pallet" || role === "rack" || role === "belt" ? { minZoom: SMALL_PARTS } : {};
-    mesh.userData = { station: id || null, role, tone, ...lod };
-    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 28), mats.edge);
-    edges.userData = { station: id || null, ...lod };
-    (part ? ram : root).add(mesh, edges);
-    if (id) { const s = st(id); s.faces.push(mesh); s.edges.push(edges); s.boxAll.union(geo.boundingBox); if (!role) s.box.union(geo.boundingBox); } // pallets, racks and workers elsewhere do not pull the camera
+    if (id) { const s = st(id); grow(s.all, geo.boundingBox); if (!role) grow(s.box, geo.boundingBox); } // pallets, racks and workers elsewhere do not pull the camera
+    const eg = new THREE.EdgesGeometry(geo, 28), edges = eg.attributes.position.array;
+    if (part) ram.push({ id: id || null, role, tone, material, pos: geo.attributes.position.array, nor: geo.attributes.normal.array, edges }); // the press's ram moves on its own
+    else {
+      const small = SMALL.has(role);
+      put(small ? "facesSmall" : "faces", id, { pos: geo.attributes.position.array, nor: geo.attributes.normal.array, key: material ? `mat:${material}:${tone}` : `face:${tone}`, role });
+      put(small ? "edgesSmall" : "edges", id, { pos: edges, key: "edge" });
+    }
+    eg.dispose(); geo.dispose();
   }
-  // lines: per station, colour per vertex
-  const lineBuckets = new Map();
+  // lines, colour per piece; the neon apart
   for (const x of A.lines) {
-    const k = (x.station ?? "") + (x.tone === "neon" ? "|neon" : ""); if (!lineBuckets.has(k)) lineBuckets.set(k, { pos: [], col: [] });
-    const b = lineBuckets.get(k), pts = moved(x.pts, x.tr), key = x.glow && x.tone === "neon" ? `glow:${x.glow}` : `line:${x.tone}`, c = col.set(tintOf(pal, key));
-    for (let i = 0; i < pts.length - 1; i++) { b.pos.push(...pts[i], ...pts[i + 1]); b.col.push(c.r, c.g, c.b, c.r, c.g, c.b); (b.runs ??= []).push([key, 2]); }
+    const pts = moved(x.pts, x.tr), pos = new Float32Array(Math.max(0, pts.length - 1) * 6);
+    for (let i = 0; i < pts.length - 1; i++) pos.set([...pts[i], ...pts[i + 1]], i * 6);
+    if (pos.length) put(x.tone === "neon" ? "neon" : "lines", x.station, { pos, key: x.glow && x.tone === "neon" ? `glow:${x.glow}` : `line:${x.tone}` });
   }
-  for (const [k, b] of lineBuckets) {
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(b.pos, 3));
-    geo.setAttribute("color", new THREE.Float32BufferAttribute(b.col, 3));
-    const [sid, neon] = k.split("|");
-    const ls = new THREE.LineSegments(geo, neon ? mats.neon : mats.line); ls.userData = { station: sid || null, bloom: !!neon, tint: b.runs };
-    root.add(ls);
-    if (sid) st(sid).lines.push(ls);
-  }
-  // window panes from both builds (each lights the faces its camera saw); a station's panes are its own mesh, so
-  // the station can be rebuilt in place (a house's too: its panes light with its week)
-  const own = (id) => !!id;
-  const paneBuckets = new Map();
+  // window panes from both recordings (each lights the faces its camera saw)
   for (const x of A.panes.concat(B.panes)) {
-    const k = own(x.station) ? x.station : "";
-    if (!paneBuckets.has(k)) paneBuckets.set(k, { pos: [], col: [] });
-    const pane = paneBuckets.get(k), pts = moved(x.pts, x.tr), key = `pane:${x.on ? "on" : "off"}:${x.hue}`, c = col.set(tintOf(pal, key));
-    for (let i = 1; i < pts.length - 1; i++) for (const p of [pts[0], pts[i], pts[i + 1]]) { pane.pos.push(...p); pane.col.push(c.r, c.g, c.b); }
-    (pane.runs ??= []).push([key, 3 * (pts.length - 2)]);
+    const pts = moved(x.pts, x.tr), pos = new Float32Array(Math.max(0, pts.length - 2) * 9);
+    for (let i = 1; i < pts.length - 1; i++) pos.set([...pts[0], ...pts[i], ...pts[i + 1]], (i - 1) * 9);
+    if (pos.length) put("panes", x.station, { pos, key: `pane:${x.on ? "on" : "off"}:${x.hue}` });
   }
-  for (const [k, pane] of paneBuckets) {
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(pane.pos, 3));
-    geo.setAttribute("color", new THREE.Float32BufferAttribute(pane.col, 3));
-    const m = new THREE.Mesh(geo, mats.pane); m.userData = { station: k || null, kind: "panes", bloom: true, tint: pane.runs }; root.add(m);
+  // dots: steady ones, and pulsing lamps (every pulsing lamp blinks with the one material)
+  for (const x of A.dots) {
+    const pos = new Float32Array(moved(x.pts, x.tr).flat());
+    if (pos.length) put(x.pulse ? "pulse" : "dots", x.station, { pos, key: x.pulse ? "pulse" : x.glow ? `glow:${x.glow}` : `dot:${x.tone}` });
   }
-  // flat polygons: the ground, holo boards, cooling tower mouths
+  // flat polygons: a station's (a patron's screen) are objects of their own; the rest, merged per kind
   for (const x of A.polys) {
-    const pts = moved(x.pts, x.tr), pos = [];
-    for (let i = 1; i < pts.length - 1; i++) pos.push(...pts[0], ...pts[i], ...pts[i + 1]);
-    const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    const pts = moved(x.pts, x.tr), screen = x.kind === "holo" && !!x.glow;
+    if (!x.station && !screen) { const m = flat.get(x.kind) ?? []; for (let i = 1; i < pts.length - 1; i++) m.push(...pts[0], ...pts[i], ...pts[i + 1]); flat.set(x.kind, m); continue; }
+    polys.push({ station: x.station ?? null, kind: x.kind, glow: x.glow, pts, pos: flatPos(pts) });
+  }
+  // each station's pieces in a layer, packed into one array: a few large arrays cross from the worker, not thousands
+  const pieces = {};
+  for (const [layer, m] of Object.entries(lists)) {
+    const out = new Map(), normals = layer === "faces" || layer === "facesSmall";
+    for (const [id, list] of m) {
+      let n = 0; for (const p of list) n += p.pos.length;
+      const pos = new Float32Array(n), nor = normals ? new Float32Array(n) : null, runs = [], subs = [];
+      let at = 0;
+      for (const p of list) { pos.set(p.pos, at); if (nor) nor.set(p.nor, at); runs.push([p.key, p.pos.length / 3]); subs.push([p.role ?? "", p.pos.length / 3]); at += p.pos.length; }
+      out.set(id, { pos, nor, runs, subs });
+    }
+    pieces[layer] = out;
+  }
+  return { pieces, bounds, ram, polys, flat: [...flat].map(([kind, pos]) => [kind, new Float32Array(pos)]), texts: A.texts.concat(B.texts), images: A.images, steam: A.steam };
+}
+// the buffers a prepared record can hand over instead of copying (postMessage's transfer list)
+export function transfers(prep) {
+  const out = new Set();
+  for (const m of Object.values(prep.pieces)) for (const p of m.values()) { out.add(p.pos.buffer); if (p.nor) out.add(p.nor.buffer); }
+  for (const r of prep.ram) { out.add(r.pos.buffer); out.add(r.nor.buffer); out.add(r.edges.buffer); }
+  for (const p of prep.polys) out.add(p.pos.buffer);
+  for (const [, pos] of prep.flat) out.add(pos.buffer);
+  return [...out];
+}
+
+// the objects of their own, on the page: the ram, screens and ground polygons, signs and labels, logos. reuse: a
+// redrawn station's signs by what they say and where (textKey), kept when the new drawing has the same one (a sign's
+// canvas is the costly part of a redraw to make and to upload)
+const textKey = (x) => JSON.stringify([x.text, x.tm, x.size, x.anchor, x.sign, x.screen, x.ticker, x.crawl, x.glow]);
+function assemble(prep, theme, mats, onAsset, reuse = null) {
+  const pal = PALETTE[theme], plain = [], texts = [], kept = new Set();
+  const info = new Map(); // id → { box, boxAll, meshes }: bounds for the camera, objects of its own for lighting and picking
+  const box3 = (b) => (b[0] === Infinity ? new THREE.Box3() : new THREE.Box3(new THREE.Vector3(b[0], b[1], b[2]), new THREE.Vector3(b[3], b[4], b[5])));
+  for (const [id, b] of prep.bounds) info.set(id, { box: box3(b.box), boxAll: box3(b.all), meshes: [] });
+  const st = (id) => { if (!info.has(id)) info.set(id, { box: new THREE.Box3(), boxAll: new THREE.Box3(), meshes: [] }); return info.get(id); };
+  const ram = new THREE.Group(); ram.name = "ram";
+  for (const r of prep.ram) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(r.pos, 3)); geo.setAttribute("normal", new THREE.BufferAttribute(r.nor, 3));
+    const named = r.material && pal.materials?.[r.material] != null;
+    if (named && !mats.material[r.material]) mats.material[r.material] = new THREE.MeshLambertMaterial({ color: pal.materials[r.material], side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+    const mesh = new THREE.Mesh(geo, named ? mats.material[r.material] : mats.face[r.tone] || mats.face.hi);
+    mesh.userData = { station: r.id, role: r.role, tone: r.tone, material: r.material };
+    const eg = new THREE.BufferGeometry(); eg.setAttribute("position", new THREE.BufferAttribute(r.edges, 3));
+    const edges = new THREE.LineSegments(eg, mats.plainEdge); edges.userData = { station: r.id };
+    ram.add(mesh, edges);
+    if (r.id) st(r.id).meshes.push(mesh);
+  }
+  for (const x of prep.polys) {
+    const { pts } = x, screen = x.kind === "holo" && !!x.glow;
+    const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.BufferAttribute(x.pos, 3));
     let mat = mats[x.kind] || mats.holo;
-    const screen = x.kind === "holo" && !!x.glow;
     if (screen) { // a lit screen: its own phase, the shader in its hue
       const cx = pts.reduce((t, p) => t + p[0], 0) / pts.length, cy = pts.reduce((t, p) => t + p[1], 0) / pts.length, seed = Math.abs(Math.sin(cx * 12.9898 + cy * 78.233) * 43758.5453) % 1;
-      geo.setAttribute("aSeed", new THREE.Float32BufferAttribute(new Float32Array(pos.length / 3).fill(seed), 1));
+      geo.setAttribute("aSeed", new THREE.Float32BufferAttribute(new Float32Array(x.pos.length / 3).fill(seed), 1));
       mat = mats["holo-" + x.glow] ??= screenMaterial(pal.glow[x.glow], mats.screenUniforms, SCREEN_BRIGHT[theme] ?? 1);
     }
-    const mesh = new THREE.Mesh(geo, mat); mesh.userData = { bloom: screen, kind: screen ? "screen" : "poly" }; if (screen) mesh.renderOrder = 1; root.add(mesh); // a screen draws before the words and marks on it (renderOrder 2)
+    const mesh = new THREE.Mesh(geo, mat); mesh.userData = { bloom: screen, kind: screen ? "screen" : "poly", station: x.station }; if (screen) mesh.renderOrder = 1; // a screen draws before the words and marks on it (renderOrder 2)
+    plain.push(mesh);
     if (x.station && x.kind === "holo") { // a screen that is a station (a patron's board): pickable, lit and framed like a solid
-      geo.computeBoundingBox(); Object.assign(mesh.userData, { station: x.station, role: "" });
+      geo.computeBoundingBox(); mesh.userData.role = "";
       if (screen && pts.length === 4) { // a wide screen spills its light on the shaft and the ground before it
         const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]), area = d(pts[0], pts[1]) * d(pts[0], pts[3]);
         if (area > 1000) {
           const u = [pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2]], v = [pts[3][0] - pts[0][0], pts[3][1] - pts[0][1], pts[3][2] - pts[0][2]];
           const nn = new THREE.Vector3(u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]).normalize(), c = new THREE.Vector3((pts[0][0] + pts[2][0]) / 2, (pts[0][1] + pts[2][1]) / 2, (pts[0][2] + pts[2][2]) / 2);
           if (nn.dot(c) < 0) nn.negate(); // out, away from the city's middle
-          const light = new THREE.PointLight(pal.glow[x.glow], SPILL[theme] ?? 400, 120, 2); light.position.copy(c).addScaledVector(nn, 7); light.userData = { station: x.station, kind: "spill", glow: x.glow }; root.add(light);
+          const light = new THREE.PointLight(pal.glow[x.glow], SPILL[theme] ?? 400, 120, 2); light.position.copy(c).addScaledVector(nn, 7); light.userData = { station: x.station, kind: "spill", glow: x.glow }; plain.push(light);
         }
       }
-      const s = st(x.station); s.faces.push(mesh); s.box.union(geo.boundingBox); s.boxAll.union(geo.boundingBox);
+      const s = st(x.station); s.meshes.push(mesh); s.box.union(geo.boundingBox); s.boxAll.union(geo.boundingBox);
     }
   }
-  // dots: steady ones and pulsing lamps, per repository (rebuilt in place when its lamp turns on or off) and one
-  // shared cloud for the rest; every pulsing cloud blinks with the one material
-  const dotBuckets = new Map();
-  for (const x of A.dots) {
-    const k = own(x.station) ? x.station : "";
-    if (!dotBuckets.has(k)) dotBuckets.set(k, { pos: [], col: [], pulse: [] });
-    const b = dotBuckets.get(k);
-    for (const p of moved(x.pts, x.tr)) {
-      if (x.pulse) b.pulse.push(...p);
-      else { const key = x.glow ? `glow:${x.glow}` : `dot:${x.tone}`, c = col.set(tintOf(pal, key)); b.pos.push(...p); b.col.push(c.r, c.g, c.b); (b.runs ??= []).push([key, 1]); }
-    }
+  for (const [kind, pos] of prep.flat) {
+    const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    const mesh = new THREE.Mesh(geo, mats[kind] || mats.holo); mesh.userData = { kind: "poly" }; plain.push(mesh);
   }
-  const pulseList = [];
-  for (const [k, b] of dotBuckets) {
-    if (b.pos.length) { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(b.pos, 3)); g.setAttribute("color", new THREE.Float32BufferAttribute(b.col, 3)); const pts = new THREE.Points(g, mats.dot); pts.userData = { station: k || null, kind: "dots", tint: b.runs }; root.add(pts); }
-    if (b.pulse.length) { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(b.pulse, 3)); const pts = new THREE.Points(g, mats.pulse); pts.userData = { station: k || null, kind: "pulse", bloom: true }; root.add(pts); pulseList.push(pts); }
-  }
-  const pulsePts = pulseList[0] ?? null; // every pulsing cloud shares mats.pulse, so animating one material blinks them all
   // signs and labels
   const css = (c) => "#" + new THREE.Color(c).getHexString();
-  const texts = [];
-  for (const x of A.texts.concat(B.texts)) {
+  for (const x of prep.texts) {
+    const key = textKey(x), old = reuse?.get(key)?.pop();
+    if (old) { plain.push(old); texts.push(old); kept.add(old); continue; }
     const colorOf = (p) => (x.screen ? "#f6f6f4" : x.ticker ? css(p.accent) : x.glow && x.sign ? css(p.glow[x.glow]) : css(x.sign ? p.line.mid : p.text)); // on a screen: white
     const mesh = textPlane(x.text, x.tm, x.size, x.anchor, colorOf(pal));
     mesh.userData.ticker = x.ticker; mesh.userData.crawl = x.crawl || ""; mesh.userData.text = x.text; mesh.userData.station = x.station ?? null; mesh.userData.bloom = !!(x.sign || x.ticker) && !x.screen; mesh.userData.colorOf = colorOf; // on a screen the screen blooms, the words stay crisp
     mesh.renderOrder = 2; // over a screen
     mesh.userData.minZoom = (x.sign || x.ticker ? SIGN_PX : PLATE_PX) / x.size; // a sign shows from 3 px tall, a plate or plaque from 5
-    root.add(mesh); texts.push(mesh);
+    mesh.userData.textKey = key;
+    plain.push(mesh); texts.push(mesh);
   }
   // logos: one textured quad each, its texture a single-tone stencil in the screen's sign hue once the image loads
   const seenQuad = new Set();
-  for (const x of A.images) { // the first recording only: its holo screens are the ones drawn (double-sided)
+  for (const x of prep.images) { // the first recording only: its holo screens are the ones drawn (double-sided)
     const k = x.quad.flat().map((v) => v.toFixed(1)).join(","); if (seenQuad.has(k)) continue; seenQuad.add(k);
     const [tl, tr, bl] = x.quad, br = [tr[0] + bl[0] - tl[0], tr[1] + bl[1] - tl[1], tr[2] + bl[2] - tl[2]];
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.Float32BufferAttribute([...tl, ...tr, ...bl, ...br], 3));
     geo.setAttribute("uv", new THREE.Float32BufferAttribute([0, 1, 1, 1, 0, 0, 1, 0], 2)); geo.setIndex([0, 2, 1, 1, 2, 3]);
     const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
-    const mesh = new THREE.Mesh(geo, mat); mesh.userData = { station: x.station ?? null, kind: "logo", bloom: !x.screen }; mesh.renderOrder = 2; root.add(mesh); // over a screen, where the screen blooms and the mark stays crisp
+    const mesh = new THREE.Mesh(geo, mat); mesh.userData = { station: x.station ?? null, kind: "logo", bloom: !x.screen }; mesh.renderOrder = 2; plain.push(mesh); // over a screen, where the screen blooms and the mark stays crisp
     const restencil = (p, done) => stencil(x.href, x.screen ? 0xf6f6f4 : x.glow && p.glow[x.glow] ? p.glow[x.glow] : p.line.hi).then((tex) => { mat.map = tex; mat.opacity = 0.85; mat.needsUpdate = true; done(); }, () => {});
     mesh.userData.restencil = restencil; restencil(pal, onAsset);
   }
-  root.add(ram);
-  return { root, stations, mats, ram, pulsePts, pulseList, texts, steam: A.steam, pal };
+  return { pieces: prep.pieces, info, plain, texts, ram, steam: prep.steam, kept };
+}
+
+// prep: prepare(recA, recB), done in the worker; without it the page prepares the records itself
+export function buildScene(recA, recB, theme = "light", { onAsset = () => {}, prep = null } = {}) { // onAsset: an image arrived (redraw)
+  const pal = PALETTE[theme], mats = makeMaterials(pal);
+  const root = new THREE.Group(); root.name = "city";
+  const layers = makeLayers(root, mats, pal);
+  const c = assemble(prep ?? prepare(recA, recB), theme, mats, onAsset);
+  for (const name of LAYERS) layers[name].build(c.pieces[name]);
+  for (const o of c.plain) root.add(o);
+  root.add(c.ram);
+  // every pulsing lamp shares mats.pulse, so the effects (a blink) and the loop animate the one material
+  return { root, stations: c.info, layers, mats, ram: c.ram, pulsePts: { material: mats.pulse }, texts: c.texts, steam: c.steam, pal };
+}
+
+// in place: these stations' drawings swapped for new ones (prep: the prepared fragments of the two records); returns
+// the objects of their own that were added, for the morph
+export function replaceIn(scene, prep, ids, theme, { onAsset = () => {} } = {}) {
+  const reuse = new Map();
+  for (const o of scene.root.children) { const k = o.userData?.textKey; if (k && ids.has(o.userData.station)) { if (!reuse.has(k)) reuse.set(k, []); reuse.get(k).push(o); } }
+  const c = assemble(prep, theme, scene.mats, onAsset, reuse);
+  for (const o of scene.root.children.filter((o) => ids.has(o.userData?.station) && !c.kept.has(o))) {
+    scene.root.remove(o); o.geometry?.dispose(); if (o.material?.map) { o.material.map.dispose(); o.material.dispose(); }
+  }
+  for (const name of LAYERS) scene.layers[name].replace(ids, c.pieces[name]);
+  if (c.ram.children.length) { scene.root.remove(scene.ram); scene.ram = c.ram; scene.root.add(c.ram); }
+  for (const id of ids) scene.stations.delete(id);
+  for (const [id, s] of c.info) scene.stations.set(id, s);
+  scene.texts = scene.texts.filter((t) => !ids.has(t.userData.station)).concat(c.texts);
+  for (const o of c.plain) if (!c.kept.has(o)) scene.root.add(o);
+  return { added: c.plain };
 }
 
 // the colour a vertex-coloured run takes from a palette: "line:<tone>", "dot:<tone>", "glow:<hue>", "pane:on|off:<hue>"
@@ -379,20 +475,19 @@ function tintOf(pal, key) {
 // recolour an existing scene for the other theme, in place: the shared materials, every vertex-coloured run (lines,
 // panes, dots: userData.tint), the signs' canvases and the logos' stencils; the movers are the map's (map3d.js rebuilds them)
 export function retheme(scene, theme, { onAsset = () => {} } = {}) {
-  const pal = PALETTE[theme], m = scene.mats, col = new THREE.Color();
+  const pal = PALETTE[theme], m = scene.mats;
+  for (const L of Object.values(scene.layers)) L.recolor((key) => colorFor(pal, key));
   for (const [k, mat] of Object.entries(m.face)) mat.color.set(pal.face[k]);
   for (const [k, mat] of Object.entries(m.material)) mat.color.set(pal.materials?.[k] ?? pal.face.hi);
-  // a theme that names a material gives it its own; one that does not puts the face tone back (dark is monochrome)
-  scene.root.traverse((o) => { const mt = o.userData?.material; if (!mt || !o.isMesh) return; let target; if (pal.materials?.[mt] != null) { if (!m.material[mt]) m.material[mt] = new THREE.MeshLambertMaterial({ color: pal.materials[mt], side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }); target = m.material[mt]; } else target = m.face[o.userData.tone] || m.face.hi; if (o.userData.base) o.userData.base = target; o.material = target; }); // (the map unlights everything before a retheme, so the lit clone is gone)
-  m.edge.color.set(pal.edge); m.litFace.color.set(pal.accent); m.litEdge.color.set(pal.accent);
+  // the ram's meshes: a theme that names a material gives it its own; one that does not puts the face tone back
+  scene.ram.traverse((o) => { const mt = o.userData?.material; if (!mt || !o.isMesh) return; if (pal.materials?.[mt] != null) { m.material[mt] ??= new THREE.MeshLambertMaterial({ color: pal.materials[mt], side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }); o.material = m.material[mt]; } else o.material = m.face[o.userData.tone] || m.face.hi; if (o.userData.base) o.userData.base = o.material; });
+  m.plainEdge.color.set(pal.edge); m.litFace.color.set(pal.accent); m.litEdge.color.set(pal.accent);
   m.holo.color.set(pal.holo); m.mouth.color.set(pal.mouth); m.ground.color.set(pal.ground); m.road.color.set(pal.road); m.pulse.color.set(pal.live);
   for (const [k, mat] of Object.entries(m)) if (k.startsWith("holo-")) { mat.uniforms.uColor.value.set(pal.glow[k.slice(5)]); mat.uniforms.uBright.value = SCREEN_BRIGHT[theme] ?? 1; }
-  scene.root.traverse((o) => {
-    const runs = o.userData?.tint, attr = o.geometry?.attributes?.color;
-    if (runs && attr) { let i = 0; for (const [key, n] of runs) { col.set(tintOf(pal, key)); for (let v = 0; v < n; v++, i++) attr.setXYZ(i, col.r, col.g, col.b); } attr.needsUpdate = true; }
+  for (const o of scene.root.children) {
     if (o.userData?.colorOf) { const c = o.userData.colorOf(pal); o.userData.color = c; o.userData.redraw(o.userData.shown ?? o.userData.text, c); }
     if (o.userData?.restencil) o.userData.restencil(pal, onAsset);
     if (o.isPointLight && o.userData?.kind === "spill") { o.color.set(pal.glow[o.userData.glow]); o.intensity = SPILL[theme] ?? 400; }
-  });
+  }
   scene.pal = pal;
 }

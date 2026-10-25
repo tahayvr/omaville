@@ -10,6 +10,8 @@ const POLL = 120 * 1000; // how often to look for a new snapshot without the str
 const IDLE = 90 * 1000; // apply a new plan on its own after this long without input
 
 // ---- a builder that prefers a worker and falls back to the main thread ----
+// build(data?, ids?, layout?): the city's two 3D records prepared into geometry (client/worker.js), the whole city or
+// (with ids) only those stations, drawn with new data
 function makeBuilder(input) {
   let worker = null, seq = 0;
   const waiting = new Map();
@@ -19,26 +21,14 @@ function makeBuilder(input) {
     worker.onerror = () => { worker = null; for (const [, w] of waiting) w.retry(); waiting.clear(); };
     worker.postMessage({ type: "data", ...input });
   } catch { worker = null; }
-  const local = async (az, three) => { const { buildCity } = await import("../city/city.js"); return buildCity({ ...input, az, three }); };
-  const build = (az, three = false) => new Promise((ok, fail) => {
-    if (!worker) return local(az, three).then(ok, fail);
+  const local = async (ids) => { const { three } = await import("./worker.js"); return three(input, ids); };
+  return (data = null, ids = null, layout = null) => new Promise((ok, fail) => {
+    if (data) input.data = data; if (layout) input.layout = layout;
+    if (!worker) return local(ids).then(ok, fail);
     const id = ++seq;
-    waiting.set(id, { ok, fail, retry: () => local(az, three).then(ok, fail) });
-    worker.postMessage({ type: "build", id, az, three });
+    waiting.set(id, { ok, fail, retry: () => local(ids).then(ok, fail) });
+    worker.postMessage({ type: "three", id, data, layout, ids });
   });
-  // build.stations: the city with new data, cut down to these stations (city/stations.js)
-  const localStations = async (az, three, ids) => {
-    const [{ buildCity }, { stationFragments }] = await Promise.all([import("../city/city.js"), import("../city/stations.js")]);
-    const c = buildCity({ ...input, az, three, only: ids }); return { fragments: stationFragments(c.svg, ids), model: c.model };
-  };
-  build.stations = (data, az, three, ids, layout = null) => new Promise((ok, fail) => {
-    input.data = data; if (layout) input.layout = layout;
-    if (!worker) return localStations(az, three, ids).then(ok, fail);
-    const id = ++seq;
-    waiting.set(id, { ok, fail, retry: () => localStations(az, three, ids).then(ok, fail) });
-    worker.postMessage({ type: "stations", id, data, layout, az, three, ids });
-  });
-  return build;
 }
 
 const webgl = () => { try { const c = document.createElement("canvas"); return !!(c.getContext("webgl2") || c.getContext("webgl")); } catch { return false; } };
@@ -62,13 +52,13 @@ export async function startCity({ stage, root, ui, config, data, layout, members
   const build = makeBuilder({ data, layout, config });
   city.build = build;
 
-  // two records of the city: the faces seen from the south-east and from the north-west, merged in 3D
+  // two records of the city: the faces seen from the south-east and from the north-west, merged in 3D (prepared in the worker)
   ui.stage = 1;
-  const [A, B] = await Promise.all([build(72, true), build(252, true)]);
+  const A = await build();
   const model = A.model;
   const { createMap } = await import("../view/map3d.js");
   ui.stage = 2; await painted(); // raising the scene holds the main thread for a moment
-  const map = createMap({ container: stage, recA: A.svg, recB: B.svg, model, theme: ui.theme, still, timeZone });
+  const map = createMap({ container: stage, prep: A.prep, model, theme: ui.theme, still, timeZone });
   city.map = map; city.model = model; ui.stage = 3;
 
   // ---- in place: new data redraws only the stations it changed, one patch at a time ----
@@ -78,8 +68,8 @@ export async function startCity({ stage, root, ui, config, data, layout, members
     if (!ids.length) return patching;
     return (patching = patching.then(async () => {
       if (L) city.layout = L;
-      const [a, b] = await Promise.all([build.stations(next, 72, true, ids, L), build.stations(next, 252, true, ids, L)]);
-      map.replaceStations(a.fragments, b.fragments, remove.map((k) => "cell:" + k));
+      const a = await build(next, ids, L);
+      map.replaceStations(a.ids, a.prep, remove.map((k) => "cell:" + k));
       merge(model, a.model); map.setModel({ runs: a.model.runs, drones: a.model.drones, ticker: a.model.ticker, roofs: a.model.roofs });
       ui.changed();
     }).catch((e) => console.error("in-place update failed", e)));
