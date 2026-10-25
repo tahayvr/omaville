@@ -1,7 +1,7 @@
 <!-- The city's page: the 3D map (lib/view) and its chrome. Picking, hovering, the keyboard, the tour, the
      cinema modes, clips and the year film are wired here; the runtime (lib/client/runtime.js) keeps the city current. -->
 <script>
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { CityUI } from "./city.svelte.js";
   import { startCity } from "../client/runtime.js";
   import Header from "./Header.svelte";
@@ -92,7 +92,7 @@
   let tourAt = 0;
   $effect(() => {
     if (!ui.touring || !ui.model) return;
-    const next = () => pick("station", ui.model.tour[tourAt++ % ui.model.tour.length]);
+    const next = () => untrack(() => pick("station", ui.model.tour[tourAt++ % ui.model.tour.length])); // pick reads the selection it sets: untracked, or the effect re-runs itself
     next(); const t = setInterval(next, 4200);
     return () => clearInterval(t);
   });

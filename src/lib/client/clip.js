@@ -7,14 +7,17 @@ export function recordClip({ source, onFrame, caption, seconds = 15, fps = 30, w
   return new Promise((resolve, reject) => {
     const src = source(), ratio = src.height / src.width, out = document.createElement("canvas");
     out.width = width; out.height = Math.round(width * ratio / 2) * 2;
-    const ctx = out.getContext("2d"), styles = getComputedStyle(document.getElementById("ow"));
+    const ctx = out.getContext("2d"), styles = getComputedStyle(document.querySelector(".ow-root") ?? document.documentElement);
     const fg = styles.getPropertyValue("--anatomy-text").trim() || "#ddd", accent = styles.getPropertyValue("--ow-accent").trim() || "#3fe0e8";
-    const type = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm", "video/mp4"].find((t) => MediaRecorder.isTypeSupported(t));
+    // H.264 first: most machines encode it in hardware (VP9 in software can starve the page), and an MP4 plays everywhere
+    const type = ["video/mp4;codecs=avc1", "video/webm;codecs=h264", "video/webm;codecs=vp8", "video/webm;codecs=vp9", "video/webm", "video/mp4"].find((t) => MediaRecorder.isTypeSupported(t));
     if (!type) return reject(new Error("this browser cannot record video"));
-    const rec = new MediaRecorder(out.captureStream(fps), { mimeType: type, videoBitsPerSecond: 8e6 }), chunks = [];
+    const rec = new MediaRecorder(out.captureStream(fps), { mimeType: type, videoBitsPerSecond: 6e6 }), chunks = [];
     rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     rec.onstop = () => { off(); resolve(new Blob(chunks, { type: type.split(";")[0] })); };
+    let drawn = -1e9;
     const draw = () => {
+      const now = performance.now(); if (now - drawn < 1000 / fps - 4) return; drawn = now; // the copy reads the GPU back: no more often than the clip's frames
       ctx.drawImage(source(), 0, 0, out.width, out.height); // copied right after the 3D view rendered this frame
       const [line1, line2] = caption(), pad = Math.round(out.width * 0.025), size = Math.round(out.width * 0.014);
       ctx.fillStyle = "rgba(0,0,0,.42)"; ctx.fillRect(0, out.height - size * 4.6, out.width, size * 4.6);
