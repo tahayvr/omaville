@@ -3,6 +3,10 @@
 // the org sample as its base). Drives a local Chrome over the DevTools protocol with Node's own WebSocket.
 //
 //   node scripts/shots.mjs [--data dev/snapshot.json] [--out shots] [--chrome /path/to/chrome] [--width 1600 --height 1000]
+//                          [--scale 2] [--gpu] [--only dark]
+//
+// --gpu draws with the machine's GPU instead of software WebGL (SwiftShader), which renders the glow and lamps
+// faithfully; --scale is the device pixel ratio.
 //
 // Writes one PNG per shot into --out and an index.md that lists them.
 import { readFile, mkdir, writeFile, mkdtemp, rm } from "node:fs/promises";
@@ -12,7 +16,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) => (a.startsWith("--") ? [...acc, [a.slice(2), all[i + 1]]] : acc), []));
-const dataFile = args.data ?? "dev/snapshot.json", outDir = args.out ?? "shots", W = +(args.width ?? 1600), Hh = +(args.height ?? 1000);
+const dataFile = args.data ?? "dev/snapshot.json", outDir = args.out ?? "shots", W = +(args.width ?? 1600), Hh = +(args.height ?? 1000), scale = +(args.scale ?? 1);
+const gpu = process.argv.includes("--gpu");
 const SHOTS = [
   { name: "3d-light", view: "3d", theme: "light" },
   { name: "3d-dark", view: "3d", theme: "dark" },
@@ -29,7 +34,7 @@ for (let i = 0; i < 100; i++) { try { if ((await fetch(site + "status")).ok) bre
 const chrome = args.chrome ?? process.env.CHROME ?? ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find(existsSync);
 if (!chrome) { console.error("no Chrome found: pass --chrome or set CHROME"); process.exit(2); }
 const profile = await mkdtemp(join(tmpdir(), "city-shots-"));
-const proc = spawn(chrome, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--hide-scrollbars", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist", "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+const proc = spawn(chrome, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--hide-scrollbars", ...(gpu ? ["--enable-gpu", "--ignore-gpu-blocklist"] : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]), "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
 const wsUrl = await new Promise((ok, fail) => {
   let buf = "";
   proc.stderr.on("data", (d) => { buf += d; const m = buf.match(/DevTools listening on (ws:\/\/\S+)/); if (m) ok(m[1]); });
@@ -59,7 +64,7 @@ for (const shot of SHOTS) {
   const s = (m, p) => send(m, p, sessionId);
   try {
     await s("Page.enable"); await s("Runtime.enable");
-    await s("Emulation.setDeviceMetricsOverride", { width: W, height: Hh, deviceScaleFactor: 1, mobile: false });
+    await s("Emulation.setDeviceMetricsOverride", { width: W, height: Hh, deviceScaleFactor: scale, mobile: false });
     await s("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: shot.theme }, { name: "prefers-reduced-motion", value: "reduce" }] });
     await s("Page.navigate", { url: site });
     const t0 = Date.now();
