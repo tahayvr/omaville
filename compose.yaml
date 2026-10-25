@@ -1,0 +1,16 @@
+# Postgres for local work only (pnpm db:start), at the DATABASE_URL in .env.example. In production the database is
+# a Coolify resource.
+services:
+  db:
+    image: postgres
+    restart: always
+    ports:
+      - 5432:5432
+    environment: 
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: mysecretpassword
+      POSTGRES_DB: local
+    volumes:
+      - pgdata:/var/lib/postgresql
+volumes:
+  pgdata:

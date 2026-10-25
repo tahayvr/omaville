@@ -1,0 +1,55 @@
+#!/bin/bash
+# Omaville on an Omarchy desktop: the kiosk page in a borderless Chromium window.
+#
+#   omaville screensaver   full screen, dark, closes at the first key, click or real pointer move
+#   omaville wallpaper     behind your windows, dark, reduced motion (needs the hyprwinwrap plugin)
+#   omaville kiosk         full screen, stays up (a hallway screen)
+#   omaville stop          closes whichever is running
+#
+# Add --still to any mode for reduced motion (the camera cuts instead of gliding).
+#
+# Install: copy this file to ~/.local/bin/omaville, make it executable, and put the city's address in
+# ~/.config/omaville/url (one line, e.g. https://city.example.org) or in OMAVILLE_URL.
+#
+# As the screensaver, in ~/.config/hypr/hypridle.conf, beside or instead of Omarchy's own:
+#   listener {
+#     timeout = 300
+#     on-timeout = omaville screensaver
+#     on-resume = omaville stop
+#   }
+#
+# As the wallpaper, with hyprwinwrap (hyprpm add https://github.com/hyprwm/hyprland-plugins && hyprpm enable
+# hyprwinwrap), in ~/.config/hypr/hyprland.conf:
+#   plugin { hyprwinwrap { class = omaville-wallpaper } }
+#   exec-once = omaville wallpaper
+#
+# Each mode runs in its own browser profile under ~/.local/state/omaville, so it never touches your own
+# browser's tabs, cookies or sign-ins.
+set -euo pipefail
+
+mode="${1:-screensaver}"; shift || true
+still=""; [[ "${1:-}" == "--still" ]] && still="&motion=reduced"
+conf="${XDG_CONFIG_HOME:-$HOME/.config}/omaville/url"
+base="${OMAVILLE_URL:-$( [[ -f "$conf" ]] && head -1 "$conf" || true )}"; base="${base%/}"
+state="${XDG_STATE_HOME:-$HOME/.local/state}/omaville"
+
+browser=""
+for b in chromium chromium-browser brave google-chrome-stable; do command -v "$b" >/dev/null && { browser="$b"; break; }; done
+
+stop() { pkill -f -- "--user-data-dir=$state/" 2>/dev/null || true; }
+
+launch() { # class, url, extra flags
+  [[ -n "$base" ]] || { echo "omaville: put the city's address in $conf or OMAVILLE_URL" >&2; exit 1; }
+  [[ -n "$browser" ]] || { echo "omaville: needs Chromium, Brave or Chrome" >&2; exit 1; }
+  mkdir -p "$state/$1"
+  setsid "$browser" --user-data-dir="$state/$1" --class="$1" --app="$2" --no-first-run --no-default-browser-check \
+    --disable-session-crashed-bubble --noerrdialogs --autoplay-policy=no-user-gesture-required "${@:3}" >/dev/null 2>&1 &
+}
+
+case "$mode" in
+  screensaver) stop; launch omaville-screensaver "$base/?mode=screensaver&theme=dark$still" --kiosk ;;
+  kiosk)       stop; launch omaville-kiosk "$base/?mode=kiosk&theme=dark$still" --kiosk ;;
+  wallpaper)   stop; launch omaville-wallpaper "$base/?mode=kiosk&theme=dark&motion=reduced" ;;
+  stop)        stop ;;
+  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

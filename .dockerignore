@@ -1,0 +1,14 @@
+node_modules
+build
+.svelte-kit
+.data
+data
+shots
+public
+clones
+.git
+.github
+.claude
+.env
+.env.*
+!.env.example

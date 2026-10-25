@@ -1,0 +1,38 @@
+# On every push and pull request: check the drawing, the sample and the tests. Deploying is Coolify's: it builds
+# the Dockerfile on a push to master. The city's data lives in the app's database, not here.
+name: city
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, dev]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: city-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check the drawing at every angle
+        run: node scripts/check.mjs
+
+      - name: The sample carries nothing private
+        run: node scripts/assert-public.mjs
+
+      - name: The relay's tests, the build, and privacy end to end
+        run: pnpm test

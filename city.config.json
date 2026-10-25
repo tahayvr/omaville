@@ -1,0 +1,209 @@
+{
+ "org": "omacom",
+ "name": "Omacom Foundation",
+ "title": "Omaville",
+ "description": "The omacom GitHub org drawn as a living city: who works on what, and what is being built, updated as it happens.",
+ "primary": "omarchy",
+ "window": 30,
+ "timezone": "UTC",
+ "bots": "\\[bot\\]|-bot$|clawbot$|^Omabot$|^Claude$|^github-actions$|^copilot",
+ "routine": {
+  "who": "github-actions|dependabot|omarchy-themes-bot|akbash-bot|kangal-bot|copilot|renovate|^omabot$|^omarchy ?bot$|^claude$",
+  "subject": "^chore: (sync|rebuild)|^Track upstream branches|^Refresh the (data|guest package lock)|^Translate published site content|^Bump \\S+ from "
+ },
+ "people": {
+  "who": "all",
+  "invited": [],
+  "hidden": []
+ },
+ "patrons": {
+  "repo": "omarchy-site",
+  "path": "src/data/patrons.json",
+  "site": "https://omarchy.org",
+  "page": "/patrons/",
+  "images": "/assets/images/patrons/",
+  "crown": {
+   "tier": "founding-token-patrons",
+   "label": "founding corporate patron"
+  },
+  "boards": {
+   "tier": "distinguished-corporate-patrons",
+   "label": "distinguished corporate patron"
+  }
+ },
+ "hints": ".omacom-city.yml",
+ "layout": {
+  "landmarks": {
+   "omarchy": {
+    "slot": "hall",
+    "what": "The distribution itself: one arcology of three joined towers. Every workshop's output ends up here."
+   },
+   "omarchy-pkgs": {
+    "slot": "press",
+    "what": "The Omarchy package repository and its build pipeline. The ram works faster the more commits landed this week."
+   },
+   "omarchy-iso": {
+    "slot": "disc",
+    "what": "The installer image. The platter turns faster the more the ISO changed this week."
+   },
+   "omarchy-mirror": {
+    "slot": "dispatch",
+    "what": "The Arch mirror on Cloudflare R2 that ships packages out."
+   },
+   "omarchy-mac": {
+    "slot": "works-1",
+    "what": "The Mac runtime: Omarchy on M-series Macs."
+   },
+   "omarchy-mac-installer": {
+    "slot": "works-2",
+    "what": "The macOS-side installer."
+   },
+   "omarchy-mac-pkgs": {
+    "slot": "works-3",
+    "what": "Packages for Apple Silicon Macs."
+   },
+   "apple-bcm-firmware": {
+    "slot": "works-4",
+    "what": "Wi-Fi and Bluetooth firmware for T2 Macs."
+   },
+   "try-omarchy-windows": {
+    "slot": "pod-1",
+    "what": "Omarchy in a VM on Windows."
+   },
+   "try-omarchy": {
+    "slot": "pod-2",
+    "what": "Omarchy in a VM on macOS."
+   }
+  },
+  "districts": [
+   {
+    "id": "apps",
+    "name": "Apps",
+    "kind": "workshop",
+    "what": "Native apps and tools that ship with Omarchy, one workshop tower each.",
+    "match": {
+     "repos": [
+      "gliff",
+      "ttfx",
+      "omasnap",
+      "owe",
+      "hype",
+      "aether",
+      "monologue",
+      "omawrite",
+      "omacut",
+      "aether.nvim",
+      "omareel",
+      "omacalc",
+      "lumon.nvim",
+      "omarchy-zsh",
+      "omarchy-fish"
+     ],
+     "pattern": "^oma(?!rchy)|\\.nvim$",
+     "topics": [
+      "omarchy-app"
+     ]
+    }
+   },
+   {
+    "id": "catalog",
+    "name": "Themes and plugins",
+    "kind": "cabinet tower",
+    "what": "Marketplaces, registries and first-party plugins, one cabinet tower each.",
+    "match": {
+     "repos": [
+      "omarchy-theme-marketplace",
+      "omarchy-plugin-marketplace",
+      "omarchy-theme-registry",
+      "omarchy-plugin-registry",
+      "omarchy-theme-sync",
+      "omarchy-port-forward-plugin",
+      "omarchy-notification-center-plugin",
+      "omarchy-audio-tuner"
+     ],
+     "pattern": "theme|plugin|marketplace|registry"
+    }
+   },
+   {
+    "id": "sites",
+    "name": "Sites",
+    "kind": "lattice mast",
+    "what": "omarchy.org and the smaller sites around it.",
+    "match": {
+     "repos": [
+      "omarchy-site",
+      "radio.omarchy.org",
+      "state-of-omarchy",
+      "omarchy-site-crt",
+      "wecanfixeverything",
+      "omarchs",
+      "oligarchy",
+      "omachee",
+      "omacon-site"
+     ],
+     "pattern": "site|\\.org$|\\.fyi$|landing"
+    }
+   },
+   {
+    "id": "upstream",
+    "name": "Upstream",
+    "kind": "silos",
+    "what": "Forks and mirrors of upstream projects. Only Omacom-authored commits count.",
+    "match": {
+     "repos": [
+      "herdr",
+      "quickshell",
+      "linux",
+      "mesa",
+      "m1n1",
+      "sddm"
+     ],
+     "flags": [
+      "fork",
+      "mirror"
+     ]
+    }
+   },
+   {
+    "id": "retired",
+    "name": "Archive",
+    "kind": "ghost",
+    "what": "Archived repositories, kept at full height as outlines.",
+    "match": {
+     "flags": [
+      "archived"
+     ]
+    }
+   }
+  ],
+  "newcomers": {
+   "name": "New towers",
+   "what": "Repositories without a district get their own tower on the next free lot, built up over their first two weeks.",
+   "buildDays": 14
+  },
+  "mirrors": [
+   "linux",
+   "mesa",
+   "m1n1",
+   "sddm"
+  ],
+  "kinds": {
+   "press": "Package press",
+   "disc": "ISO press",
+   "works": "Apple Silicon works",
+   "pod": "Try Omarchy"
+  },
+  "signs": {
+   "hall": "OMARCHY",
+   "billboard": "OMACOM",
+   "dispatch": "DISPATCH",
+   "works-1": "MAC",
+   "works-2": "INSTALL"
+  },
+  "boards": [
+   "OMARCHY\nLINUX FOR YOU",
+   "OMACOM\nBUILD IT",
+   "HYPRLAND\nARCH"
+  ]
+ }
+}

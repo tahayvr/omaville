@@ -1,0 +1,42 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "city",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "dev"
+      ],
+      "port": 8080
+    },
+    {
+      "name": "members",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "dev:members",
+        "--port",
+        "8088"
+      ],
+      "port": 8088
+    },
+    {
+      "name": "signin",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "dev",
+        "--port",
+        "8090"
+      ],
+      "port": 8090,
+      "env": {
+        "BETTER_AUTH_SECRET": "local-dev-only-secret-0123456789abcdef",
+        "BETTER_AUTH_URL": "http://localhost:8090",
+        "GITHUB_CLIENT_ID": "local-dev-only",
+        "GITHUB_CLIENT_SECRET": "local-dev-only",
+        "BASECAMP_CLIENT_ID": "local-dev-only",
+        "BASECAMP_CLIENT_SECRET": "local-dev-only",
+        "DATABASE_URL": "pglite:memory"
+      }
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+@import 'tailwindcss';
+@import "tw-animate-css";
+@import "shadcn-svelte/tailwind.css";
+@import "@fontsource-variable/jetbrains-mono";
+
+/* dark is mode-watcher's class on <html> (the system's choice, or the viewer's from the toolbar or ?theme=) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* shadcn-svelte (the Lyra style) on the city's palette: the plate's page, glass, hairlines and inks, cyan for
+   focus and selection; no other colour. Inside the app the tokens follow the live --ow-* and --anatomy-*
+   variables; at the root (popups portalled to the body) they carry the same values. */
+:root {
+	--background: #f2f2ef; --foreground: #18181a; --card: rgba(251, 251, 250, 0.86); --card-foreground: #18181a;
+	--popover: #fbfbfa; --popover-foreground: #18181a; --primary: #18181a; --primary-foreground: #fbfbfa;
+	--secondary: #0000000a; --secondary-foreground: #18181a; --muted: #0000000a; --muted-foreground: #6e6e6e;
+	--accent: #0e8fa31f; --accent-foreground: #18181a; --destructive: #d6338a; --border: #0000001a; --input: #0000001a;
+	--ring: #0e8fa3; --radius: 0rem;
+}
+:root.dark {
+	--background: #0b0b0b; --foreground: #e6e6e6; --card: rgba(19, 19, 19, 0.84); --card-foreground: #e6e6e6;
+	--popover: #131313; --popover-foreground: #e6e6e6; --primary: #e6e6e6; --primary-foreground: #131313;
+	--secondary: #ffffff0d; --secondary-foreground: #e6e6e6; --muted: #ffffff0d; --muted-foreground: #8c8c90;
+	--accent: #3fe0e824; --accent-foreground: #e6e6e6; --destructive: #ff4fc8; --border: #ffffff1c; --input: #ffffff1c; --ring: #3fe0e8;
+}
+.iso.ow-root {
+	--background: var(--ow-page); --foreground: var(--anatomy-strong); --card: var(--ow-glass); --card-foreground: var(--anatomy-strong);
+	--popover: var(--anatomy-card); --popover-foreground: var(--anatomy-strong); --primary: var(--anatomy-strong); --primary-foreground: var(--anatomy-card);
+	--muted-foreground: var(--anatomy-muted); --accent: var(--ow-accent-soft); --destructive: var(--ow-live);
+	--border: var(--ow-ring); --input: var(--ow-ring); --ring: var(--ow-accent);
+	--anatomy-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, monospace; /* Lyra's mono, for the chrome and the plate's labels */
+}
+
+@theme inline {
+	--font-mono: 'JetBrains Mono Variable', monospace;
+	--color-ring: var(--ring);
+	--color-input: var(--input);
+	--color-border: var(--border);
+	--color-destructive: var(--destructive);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-accent: var(--accent);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-muted: var(--muted);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-secondary: var(--secondary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-primary: var(--primary);
+	--color-popover-foreground: var(--popover-foreground);
+	--color-popover: var(--popover);
+	--color-card-foreground: var(--card-foreground);
+	--color-card: var(--card);
+	--color-foreground: var(--foreground);
+	--color-background: var(--background);
+	--radius-sm: calc(var(--radius) * 0.6);
+	--radius-md: calc(var(--radius) * 0.8);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) * 1.4);
+	--radius-2xl: calc(var(--radius) * 1.8);
+	--radius-3xl: calc(var(--radius) * 2.2);
+	--radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@layer base {
+	* {
+		@apply border-border outline-ring/50;
+	}
+	html {
+		@apply font-mono;
+	}
+}

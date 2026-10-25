@@ -1,0 +1,58 @@
+{
+  "name": "omaville",
+  "version": "0.3.0",
+  "private": true,
+  "description": "A GitHub org drawn as a living city.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "packageManager": "pnpm@12.14.0",
+  "scripts": {
+    "dev": "vite dev",
+    "dev:members": "CITY_SAMPLE=members DATABASE_URL=pglite:memory vite dev",
+    "build": "vite build",
+    "start": "node --env-file-if-exists=.env build",
+    "shots": "node scripts/shots.mjs --out shots",
+    "preview": "vite preview",
+    "check": "node scripts/check.mjs",
+    "test": "node scripts/test-relay.mjs && vite build && node scripts/test-privacy.mjs",
+    "collect": "node scripts/collect.mjs",
+    "fire": "node scripts/fire.mjs",
+    "load": "node scripts/load.mjs",
+    "db:start": "docker compose up",
+    "db:push": "drizzle-kit push",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
+  },
+  "devDependencies": {
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@internationalized/date": "^3.12.4",
+    "@sveltejs/adapter-node": "^5.5.7",
+    "@sveltejs/kit": "^2.70.3",
+    "@sveltejs/vite-plugin-svelte": "^5.1.1",
+    "@tailwindcss/vite": "^4.3.0",
+    "@types/node": "^24",
+    "bits-ui": "^2.19.5",
+    "cn": "^0.5.0",
+    "drizzle-kit": "^0.31.10",
+    "layerchart": "^2.8.0",
+    "mode-watcher": "^1.1.0",
+    "phosphor-svelte": "^3.1.1",
+    "shadcn-svelte": "^1.7.0",
+    "svelte": "^5.57.2",
+    "svelte-sonner": "^1.2.1",
+    "tailwind-variants": "^3.3.1",
+    "tailwindcss": "^4.3.0",
+    "tw-animate-css": "^1.4.0",
+    "vite": "^6.4.4"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.10",
+    "better-auth": "^1.7.10",
+    "drizzle-orm": "^0.45.4",
+    "postgres": "^3.4.9",
+    "three": "0.169.0"
+  }
+}

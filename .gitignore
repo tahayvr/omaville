@@ -1,0 +1,13 @@
+node_modules/
+.svelte-kit/
+build/
+.data/
+data/
+public/
+clones/
+shots/
+dist/
+.env
+.env.*
+!.env.example
+dev/
