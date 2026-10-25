@@ -13,19 +13,22 @@
   import Legend from "./Legend.svelte";
   import Replay from "./Replay.svelte";
   import Icon from "./Icon.svelte";
+  import Loading from "./Loading.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { Toaster } from "$lib/components/ui/sonner/index.js";
   import { mode, setMode, toggleMode } from "mode-watcher";
 
-  let { config, me, data, layout, members = false } = $props();
+  // data null: the relay has no snapshot yet; waiting says why, and the page opens the city once there is one
+  let { config, me, data, layout, members = false, waiting = "" } = $props();
   // the org's words (city.config.json): the city's title on captions and files, the org's name in the header
-  const org = $derived(config.org || data.org || ""), title = $derived(config.title || `${org} city`), slug = $derived(title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "city");
+  const org = $derived(config.org || data?.org || ""), title = $derived(config.title || `${org} city`), slug = $derived(title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "city");
   const ui = new CityUI({ me: (() => me)() }); // who is signed in does not change while the page is open
   let root = $state(), stage = $state(), crewEl = $state(null), detailEl = $state(null), daysEl = $state(null), toolsEl = $state(null), dockEl = $state(), bar = $state(), hud = $state(), search = $state(null);
   let replayEl = $state(null), replay = $state(null);
   let clip = $state(null), film = $state(null);
   let city = null, map = null, cinema = null;
+  let mounted = $state(false), why = $state((() => waiting)()); // the chrome shows once the theme is known; why: the waiting reason, kept current
   const q = (k) => new URLSearchParams(location.search).get(k);
 
   // ---- where the camera may look: the free area between the cards ----
@@ -157,14 +160,18 @@
 
   onMount(() => {
     const t = q("theme"); if (t === "dark" || t === "light") setMode(t); // the kiosk and the screensaver
-    const ro = new ResizeObserver(() => fitChrome()); ro.observe(root); ro.observe(toolsEl); // the tools grow when the clip and film buttons arrive
+    ui.theme = mode.current === "dark" ? "dark" : "light"; mounted = true; // the theme first, then the chrome: never a light card on a dark page
+    if (!data) { // no snapshot yet: ask the relay every few seconds, and open the city once it has one
+      const poll = setInterval(async () => { try { const s = await (await fetch("/status", { cache: "no-store" })).json(); if (s.base) location.reload(); else if (s.waiting) why = s.waiting; } catch {} }, 5000);
+      return () => clearInterval(poll);
+    }
+    const ro = new ResizeObserver(() => fitChrome()); ro.observe(root); if (toolsEl) ro.observe(toolsEl); // the tools grow when the clip and film buttons arrive
     const cinemaMode = ["cinema", "kiosk", "screensaver"].includes(q("mode")) ? q("mode") : null;
     if (stage.clientWidth < 860) ui.folded.crew = true;
     if (stage.clientWidth < 1180 && !ui.foldsKept) { ui.folded.crew = true; ui.folded.detail = true; } // a narrow window: the city first, the cards a click away (not kept: a wider window opens them again)
     const vis = () => (document.hidden ? map?.stop() : map?.start());
     document.addEventListener("visibilitychange", vis);
     let gone = false;
-    ui.say("Drawing the city…");
     const refused = q("error"); // Better Auth sends a refused sign-in back here
 
     (async () => {
@@ -174,7 +181,6 @@
       ui.onRefresh = () => city.applyPending();
       if (import.meta.env.DEV) window.__city = { city, ui, map }; // for inspection while developing
       ui.setModel(city.model);
-      ui.say("");
       if (refused) ui.sayFor(refused === "not_invited" ? "That account is not a member or invited" : "Sign-in did not finish", 8000);
       map.onUser = () => stopTour();
       map.onFrame = () => {
@@ -188,6 +194,7 @@
       map.setLit(ui.L.idsFor(ui.selected));
       map.start();
       root.dataset.ready = "1"; // drawn (the screenshots wait for this)
+      requestAnimationFrame(() => requestAnimationFrame(() => (ui.stage = 4))); // the first frames are up: the plate fades away
       // pick up where the last visit left off (the page reloads itself for a new plan); ?house=<login> opens on that
       // person's house (the welcome comment links here)
       const r = city.restore, P = ui.model.people, ST = ui.model.stations, R = ui.model.repos;
@@ -199,7 +206,7 @@
       city.startReplay({ fx: (p) => map.fx(p) }).then(() => (replay = city.replay));
       city.arrival({ cinema: !!cinemaMode });
       if (ui.mode === "3d") start3dExtras(cinemaMode);
-    })().catch((err) => { console.error(err); ui.say("The city could not be drawn: " + err.message, "ow-error"); });
+    })().catch((err) => { console.error(err); ui.loadError = err.message; }); // the plate says so
     return () => { gone = true; ro.disconnect(); document.removeEventListener("visibilitychange", vis); map?.stop(); };
   });
 
@@ -246,11 +253,13 @@
 <svelte:window onkeydown={keydown} />
 
 <Tooltip.Provider delayDuration={300}>
-<div class="iso ow-root ow-app" bind:this={root} data-theme={ui.theme}>
+<div class="iso ow-root ow-app" bind:this={root} data-theme={ui.theme} data-mounted={mounted || undefined}>
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div class="ow-stage" bind:this={stage} tabindex="0" role="application" aria-label="{title} map. Arrow keys step between stations, Enter opens one, plus and minus zoom."
     onpointerdown={pointerdown} onpointerup={pointerup} onpointermove={pointermove} onpointerleave={() => { if (!down) hover(null); }} ondblclick={dblclick}></div>
-  <Header {ui} {org} name={config.name || org} days={data.window?.days ?? 30} onpick={choose} bind:search bind:bar bind:hud />
+  {#if ui.stage < 4 || ui.loadError || !data}<Loading {title} stage={ui.stage} repos={data ? Object.keys(data.repos).length : 0} houses={data?.contributors?.length ?? 0} error={ui.loadError} waiting={data ? "" : why || "the relay has no snapshot yet"} />{/if}
+  <Header {ui} {org} name={config.name || org} days={data?.window?.days ?? 30} idle={!data} onpick={choose} bind:search bind:bar bind:hud />
+  {#if data}
   <Crew {ui} onpick={choose} onhover={hover} bind:el={crewEl} />
   <Detail {ui} onpick={choose} onhover={hover} onclose={close} bind:el={detailEl} />
   <Button variant="outline" size="icon-lg" class="ow-restore ow-restore-detail" aria-label="Show the detail card" hidden={!ui.model || !(ui.folded.detail || (ui.narrow && !ui.selected && !ui.wantOverview))}
@@ -262,6 +271,7 @@
   </div>
   <Legend {ui} {config} portal={root} />
   <Tip {ui} />
+  {/if}
   <Toaster position="top-center" offset={64} />
   <div class="ow-sr" aria-live="polite">{ui.live}</div>
 </div>

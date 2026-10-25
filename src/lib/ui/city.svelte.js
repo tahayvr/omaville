@@ -25,6 +25,8 @@ export class CityUI {
   heading = $state(72);
   narrow = $state(false);
   theme = $state("light");
+  stage = $state(0); // the loading plate: 0 reading, 1 laying out, 2 raising, 3 lighting, 4 drawn (Loading.svelte)
+  loadError = $state(""); // why the city could not be drawn
   lastEvent = "";
   fresh = false; // a new plan waits for a reload (the toast with Refresh)
   onRefresh = () => {};

@@ -11,6 +11,40 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--ow-page)}
 .ow-app{position:fixed;inset:0;background:var(--anatomy-page);color:var(--anatomy-text);font:13px/1.5 var(--ow-sans);-webkit-font-smoothing:antialiased;overflow:hidden;--anatomy-paper:var(--anatomy-page)}
 .ow-app[data-theme="dark"]{color-scheme:dark}
 
+/* before the app knows its theme (the first paint), the page shows its own background and the loading plate, and the
+   chrome waits: never a light card on a dark page */
+.ow-app:not([data-mounted]){background:var(--ow-page)}
+.ow-app:not([data-mounted]) .ow-stage{background:none}
+.ow-app :is(.ow-bar,.ow-card,.ow-dock,.ow-restore){transition:opacity .35s ease}
+.ow-app:not([data-mounted]) :is(.ow-bar,.ow-card,.ow-dock,.ow-restore){opacity:0}
+
+/* the loading plate (ui/Loading.svelte): the mark as a small isometric model, its platforms rising in a wave; its
+   colours follow the page's mode (html.dark), so it is right before the app knows its theme */
+:root{--ow-load-ink:#2b2622;--ow-load-dim:#8a8478;--ow-load-top:#f6f0e4;--ow-load-l:#ddd5c6;--ow-load-r:#c9bfad;--ow-load-edge:#6e655b;--ow-load-crest:#0e8fa3;--ow-load-plate:#cfc7b8;--ow-load-dot:#b3aa9b}
+:root.dark{--ow-load-ink:#e6e6e6;--ow-load-dim:#777;--ow-load-top:#2c2c2c;--ow-load-l:#1f1f1f;--ow-load-r:#171717;--ow-load-edge:#5a5a5a;--ow-load-crest:#3fe0e8;--ow-load-plate:#262626;--ow-load-dot:#3a3a3a}
+.ow-loader{position:absolute;inset:0;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;pointer-events:none;padding:96px 16px}
+.ow-load-mark{width:min(340px,72vw);height:auto;overflow:visible}
+.ow-load-plate{fill:none;stroke:var(--ow-load-plate);stroke-width:.6;stroke-dasharray:2 2}
+.ow-load-dot{fill:var(--ow-load-dot)}
+.ow-load-cell path{stroke:var(--ow-load-edge);stroke-width:.35;stroke-linejoin:round}
+.ow-load-t{fill:var(--ow-load-top)}.ow-load-l{fill:var(--ow-load-l)}.ow-load-r{fill:var(--ow-load-r)}
+.ow-load-cell{animation:ow-load-enter .7s cubic-bezier(.2,.7,.2,1) var(--d) both}
+.ow-load-lift{animation:ow-load-wave 2.8s ease-in-out var(--w) infinite}
+.ow-load-lift .ow-load-t{animation:ow-load-crest 2.8s ease-in-out var(--w) infinite}
+@keyframes ow-load-enter{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes ow-load-wave{0%,38%,100%{transform:none}16%{transform:translateY(-5px)}}
+@keyframes ow-load-crest{0%,38%,100%{fill:var(--ow-load-top)}16%{fill:var(--ow-load-crest)}}
+.ow-load-waiting .ow-load-lift,.ow-load-waiting .ow-load-lift .ow-load-t{animation-duration:5.6s}
+.ow-load-error .ow-load-lift,.ow-load-error .ow-load-lift .ow-load-t{animation:none}.ow-load-error .ow-load-mark{opacity:.45}
+.ow-load-text{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;max-width:440px;font-family:var(--anatomy-mono,ui-monospace,monospace)}
+.ow-load-eyebrow{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ow-load-dim)}
+.ow-load-head{font-size:15px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ow-load-ink)}
+.ow-load-line{font-size:12px;color:var(--ow-load-dim);min-height:1.5em}
+.ow-load-note{font-size:11px;color:var(--ow-load-dim);opacity:.8}
+.ow-load-steps{display:flex;gap:4px;margin-top:4px}.ow-load-steps i{width:22px;height:2px;background:var(--ow-load-plate);transition:background .3s}.ow-load-steps i.on{background:var(--ow-load-crest)}
+.ow-load-error .ow-load-head{color:var(--ow-live,#d6338a)}
+@media (prefers-reduced-motion:reduce){.ow-load-cell,.ow-load-lift,.ow-load-lift .ow-load-t{animation:none}}
+
 /* the map */
 .ow-stage{position:absolute;inset:0;outline:none;touch-action:none;cursor:grab;
   background:radial-gradient(90% 70% at 50% 45%,var(--anatomy-card) 0%,var(--anatomy-page) 72%)}

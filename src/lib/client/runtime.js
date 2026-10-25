@@ -57,16 +57,19 @@ export async function startCity({ stage, root, ui, config, data, layout, members
   const tzAsk = q("tz"), timeZone = tzAsk === "local" ? Intl.DateTimeFormat().resolvedOptions().timeZone : tzAsk || config.timezone || "UTC";
   const still = q("motion") === "reduced" || matchMedia("(prefers-reduced-motion: reduce)").matches; // ?motion=reduced: the screensaver and the wallpaper
   const city = { data, layout, mode: "3d", timeZone, still, replaying: false, afterReplay: new Set(), restore, members };
-  if (!webgl()) { ui.say("This city is drawn with WebGL, which this browser does not have", "ow-error"); throw new Error("no WebGL"); }
+  if (!webgl()) throw new Error("This city is drawn with WebGL, which this browser does not have.");
+  const painted = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))); // the plate shows its stage before the next heavy step
   const build = makeBuilder({ data, layout, config });
   city.build = build;
 
   // two records of the city: the faces seen from the south-east and from the north-west, merged in 3D
+  ui.stage = 1;
   const [A, B] = await Promise.all([build(72, true), build(252, true)]);
   const model = A.model;
   const { createMap } = await import("../view/map3d.js");
+  ui.stage = 2; await painted(); // raising the scene holds the main thread for a moment
   const map = createMap({ container: stage, recA: A.svg, recB: B.svg, model, theme: ui.theme, still, timeZone });
-  city.map = map; city.model = model;
+  city.map = map; city.model = model; ui.stage = 3;
 
   // ---- in place: new data redraws only the stations it changed, one patch at a time ----
   let patching = Promise.resolve();

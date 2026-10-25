@@ -6,7 +6,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { fmt } from "../client/format.js";
-  let { ui, org = "", name = org, days = 30, onpick, search = $bindable(null), bar = $bindable(), hud = $bindable() } = $props();
+  let { ui, org = "", name = org, days = 30, idle = false, onpick, search = $bindable(null), bar = $bindable(), hud = $bindable() } = $props();
   const T = $derived((ui.rev, ui.L ? ui.L.totals() : null));
   const cells = $derived(T ? [
     [fmt(T.c30), "commits", `Commits in the ${ui.L.WIN} days to ${ui.L.TO}, across every repository`], [fmt(T.c7), "this week", "Commits in the last 7 days"],
@@ -21,6 +21,7 @@
     {#if ui.me?.who}<span class="ow-auth"><b>members' city</b> · {ui.me.who}{#if !ui.me.dev} · <Button variant="link" size="xs" class="ow-signin" onclick={() => import("../client/auth.js").then((a) => a.signOut())}>sign out</Button>{/if}</span>
     {:else if ui.me?.providers?.length}<span class="ow-auth">public city · sign in with {#each ui.me.providers as p, i}{i ? " or " : ""}<Button variant="link" size="xs" class="ow-signin" onclick={() => import("../client/auth.js").then((a) => a.signIn(p))}>{p === "github" ? "GitHub" : "Basecamp"}</Button>{/each}</span>{/if}
   </div>
+  {#if !idle}<!-- idle: no city yet (the loading plate waits for the first scan), so nothing to search or total -->
   <Search {ui} {onpick} bind:input={search} />
   <div class="ow-hudwrap" class:ow-folded={ui.folded.hud}>
     <div class="ow-hud" bind:this={hud} role="group" aria-label="Totals">
@@ -37,4 +38,5 @@
     <IconButton label="Collapse the totals" class="ow-hudmin" onclick={() => ui.fold("hud", true)}><Icon name="min" /></IconButton>
     <Button variant="outline" size="icon-lg" class="ow-restore" aria-label="Show the totals" hidden={!ui.folded.hud} onclick={() => ui.fold("hud", false)}><Icon name="gauge" size="1.1em" /></Button>
   </div>
+  {/if}
 </header>
