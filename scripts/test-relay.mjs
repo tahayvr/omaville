@@ -313,4 +313,16 @@ await t("the page's config carries the layout's words, never a private repositor
   assert.deepEqual(pub.layout.districts, [{ id: "apps", name: "Apps" }]); assert.deepEqual(pub.layout.landmarks, { open: { slot: "hall" } }); assert.deepEqual(pub.layout.kits, {}); assert.equal(pub.layout.kinds.hall, "Hall");
   assert.equal(publicConfig(cfg, { private: ["secret"], member: true }).layout.landmarks.secret.slot, "press");
 });
+await t("with no city yet, the relay says why: no token, scanning off, an unreadable base file; nothing once there is one", async () => {
+  const { createRelay } = await import("../src/lib/server/relay/relay.mjs");
+  const quiet = () => {};
+  const none = await createRelay({ env: {}, members: false, log: quiet });
+  assert.match(none.waiting(), /GITHUB_TOKEN is not set/); assert.match((await (await none.status()).json()).waiting, /GITHUB_TOKEN/); await none.close();
+  const off = await createRelay({ env: { GITHUB_TOKEN: "x" }, scanEvery: 0, members: false, log: quiet });
+  assert.match(off.waiting(), /scanning is off/); assert.ok(!off.waiting().includes("x\"")); await off.close();
+  const lost = await createRelay({ env: {}, data: "no/such/file.json", members: false, log: quiet });
+  assert.match(lost.waiting(), /CITY_DATA could not be read \(the file does not exist\)/); await lost.close();
+  const ready = await createRelay({ env: {}, data: "dev/snapshot.json", members: false, log: quiet });
+  assert.equal(ready.waiting(), null); await ready.close();
+});
 console.error(`${n} tests passed`);

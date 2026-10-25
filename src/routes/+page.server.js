@@ -3,6 +3,6 @@ import { error } from "@sveltejs/kit";
 
 export function load({ locals }) {
   const city = locals.relay.city(!!locals.member);
-  if (!city) error(503, "The city has no snapshot yet: the first scan is still running.");
+  if (!city) error(503, `The city has no snapshot yet: ${locals.relay.waiting() ?? "it is on its way"}.`); // the relay says why: no token, scanning off, the scan's error, or a scan under way
   return { city, members: !!locals.member };
 }

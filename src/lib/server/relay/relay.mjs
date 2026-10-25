@@ -46,6 +46,8 @@ export async function createRelay(opts = {}) {
   const started = Date.now();
   const scanEvery = +(opts.scanEvery ?? (token && !opts.data ? 15 : 0));
   const LOGO_BASE = config.patrons?.site ? new URL(config.patrons.images ?? "/", config.patrons.site).href : "", logos = new Map(); // the logo proxy's source (config.patrons: site + images) and cache
+  const plain = (s) => String(s).replace(/https?:\/\/\S+/g, "(a GitHub API call)").slice(0, 200); // a note the public may read: no URL, which could name a private repository
+  let dataNote = ""; // why the base file could not be read
   let lastScan = { at: 0, ok: null, note: "" }, base = null, baseMembers = null, backfill = { running: false }; // the full snapshots the states were built on
   const timers = [];
 
@@ -103,8 +105,8 @@ export async function createRelay(opts = {}) {
         if (history.length) say(`  history: ${history.length} commits appended to the log`);
         const master = layoutCity(both.members, config, members.layout()); // live placements are kept: the layout only grows (a new database lays it out from scratch)
         const ok = await setBase(both.public, master, why, both.members);
-        lastScan = { at: Math.floor(Date.now() / 1000), ok, note: `${Math.round((Date.now() - t0) / 1000)} s` };
-      } catch (e) { lastScan = { at: Math.floor(Date.now() / 1000), ok: false, note: e.message.slice(0, 200) }; say(`${why} failed: ${e.message.slice(0, 200)}`); }
+        lastScan = { at: Math.floor(Date.now() / 1000), ok, note: ok ? `${Math.round((Date.now() - t0) / 1000)} s` : "the snapshot was refused by the privacy guard (the app's logs name the problems)" };
+      } catch (e) { lastScan = { at: Math.floor(Date.now() / 1000), ok: false, note: plain(e.message) }; say(`${why} failed: ${e.message.slice(0, 200)}`); }
       finally { scanning = null; }
     })());
   }
@@ -118,7 +120,7 @@ export async function createRelay(opts = {}) {
       if (opts.sample !== "members") return void (await setBase(data, layoutCity(data, config, members.layout()), `base from ${opts.data}`));
       const { sampleMembers } = await import("../sample.mjs"), membersData = sampleMembers(data); membersData.seq = data.seq; // its private repository and wards are placed like a scan's
       await setBase(data, layoutCity(membersData, config, members.layout()), `base from ${opts.data}, with the invented members' sample`, membersData);
-    } catch (e) { say(`base not read from ${opts.data}: ${e.message.slice(0, 120)}`); }
+    } catch (e) { dataNote = e.code === "ENOENT" ? "the file does not exist" : plain(e.message).slice(0, 120); say(`base not read from ${opts.data}: ${e.message.slice(0, 120)}`); }
   }
 
   // ---- the streams: one set of open pages per city ----
@@ -173,9 +175,20 @@ export async function createRelay(opts = {}) {
   const MAX_BODY = 25 * 1024 * 1024;
   const bodyOf = async (req) => { const b = Buffer.from(await req.arrayBuffer()); if (b.length > MAX_BODY) throw new Error("too large"); return b; };
 
+  // why there is no city yet, in words a page may show (never a secret, never a private name); null once there is one
+  function waiting() {
+    if (base) return null;
+    if (scanning) return "the first scan of the org is running, which takes a minute or two";
+    if (opts.data) return `the base file set in CITY_DATA could not be read${dataNote ? ` (${dataNote})` : ""}`;
+    if (!token) return "GITHUB_TOKEN is not set, so the org is never scanned. Set it in the app's environment and restart";
+    if (!scanEvery) return "scanning is off because CITY_SCAN_EVERY is 0. Set it to 15, or POST /scan once";
+    if (lastScan.ok === false) return `the last scan failed: ${lastScan.note}`;
+    return "the first scan has not started yet";
+  }
+
   // ---- the API the routes call ----
   const relay = {
-    config, log, insecure,
+    config, log, insecure, waiting,
     privateRepos: () => members.layout()?.private ?? [], // every repository that was ever private (the master layout), for the page's config
     // the city now, for the page's load: { data, layout } (mem: the members' city), or null before the first base
     city: (mem) => { const s = mem ? members : state; return s.current() ? { data: s.current(), layout: s.layout() } : null; },
@@ -245,7 +258,7 @@ export async function createRelay(opts = {}) {
     },
     async status() {
       const a = [...ingestMs].sort((x, y) => x - y);
-      return json({ ...(await log.status()), database: dbKind, streams: clients.size, members: membersOn, memberStreams: memberClients.size, signin: !!(opts.signin || opts.devSignin), welcome: welcome.on, hooks, ingest: a.length ? { p50: +a[Math.floor(a.length / 2)].toFixed(2), p95: +a[Math.floor(a.length * 0.95)].toFixed(2), n: a.length } : null, uptime: Math.round((Date.now() - started) / 1000), base: state.base(), scan: { every: scanEvery, ...lastScan, running: !!scanning }, backfill });
+      return json({ ...(await log.status()), waiting: waiting(), database: dbKind, streams: clients.size, members: membersOn, memberStreams: memberClients.size, signin: !!(opts.signin || opts.devSignin), welcome: welcome.on, hooks, ingest: a.length ? { p50: +a[Math.floor(a.length / 2)].toFixed(2), p95: +a[Math.floor(a.length * 0.95)].toFixed(2), n: a.length } : null, uptime: Math.round((Date.now() - started) / 1000), base: state.base(), scan: { every: scanEvery, ...lastScan, running: !!scanning }, backfill });
     },
 
     // a GitHub webhook (X-Hub-Signature-256 checked against CITY_WEBHOOK_SECRET)
