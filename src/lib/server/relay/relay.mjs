@@ -44,7 +44,7 @@ export async function createRelay(opts = {}) {
   // a private repository and takes new repositories' places from the master, so positions agree in both
   const log = createLog(db), members = createState(log, { config, includePrivate: true }), state = createState(log, { config, layoutSource: () => publicLayout(members.layout()) });
   const started = Date.now();
-  const scanEvery = +(opts.scanEvery ?? (token && !opts.data ? 15 : 0));
+  const scanEvery = +(opts.scanEvery ?? (token && !opts.data ? 60 : 0)); // minutes: hourly by default; webhooks carry the live changes between scans
   const LOGO_BASE = config.patrons?.site ? new URL(config.patrons.images ?? "/", config.patrons.site).href : "", logos = new Map(); // the logo proxy's source (config.patrons: site + images) and cache
   const plain = (s) => String(s).replace(/https?:\/\/\S+/g, "(a GitHub API call)").slice(0, 200); // a note the public may read: no URL, which could name a private repository
   let dataNote = ""; // why the base file could not be read
@@ -181,7 +181,7 @@ export async function createRelay(opts = {}) {
     if (scanning) return "the first scan of the org is running, which takes a minute or two";
     if (opts.data) return `the base file set in CITY_DATA could not be read${dataNote ? ` (${dataNote})` : ""}`;
     if (!token) return "GITHUB_TOKEN is not set, so the org is never scanned. Set it in the app's environment and restart";
-    if (!scanEvery) return "scanning is off because CITY_SCAN_EVERY is 0. Set it to 15, or POST /scan once";
+    if (!scanEvery) return "scanning is off because CITY_SCAN_EVERY is 0. Set it to 60, or POST /scan once";
     if (lastScan.ok === false) return `the last scan failed: ${lastScan.note}`;
     return "the first scan has not started yet";
   }

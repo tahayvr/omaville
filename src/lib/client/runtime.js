@@ -170,9 +170,9 @@ export async function startCity({ stage, root, ui, config, data, layout, members
   let healthKey = "";
   async function health() {
     if (city.replaying) return;
-    let t = city.data.generatedAt || city.data.now;
-    try { const s = await (await fetch("/status")).json(); t = s.scan?.ok ? s.scan.at : s.base?.generatedAt || t; } catch {}
-    const age = Date.now() / 1000 - t, level = Math.round(8 * Math.max(0, Math.min(1, 1 - (age - 900) / 6300))) / 8;
+    let t = city.data.generatedAt || city.data.now, every = 3600; // the scan interval, from /status (an hour by default)
+    try { const s = await (await fetch("/status")).json(); t = s.scan?.ok ? s.scan.at : s.base?.generatedAt || t; if (s.scan?.every > 0) every = s.scan.every * 60; } catch {}
+    const age = Date.now() / 1000 - t, level = Math.round(8 * Math.max(0, Math.min(1, 1 - (age - every) / (2 * every)))) / 8; // full within one interval, empty two intervals later
     const st = city.live?.state?.(), lamp = st === undefined ? "off" : st === 1 ? "ok" : "down";
     const key = `${level}|${lamp}|${city.data.generatedAt}`; if (key === healthKey) return;
     healthKey = key; city.data.health = { level, lamp }; city.patch(city.data, ["relay"]);

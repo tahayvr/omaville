@@ -38,8 +38,8 @@ Run `check.mjs` after any change to `src/lib/city/city.js`, `kit3d.js` or `grid.
 
 The relay owns the city's data; the code holds no data, and GitHub Actions only checks the code (`.github/workflows/city.yml`). Screenshots are local: `pnpm shots`.
 
-1. `collector/scan.mjs` scans the org into a snapshot (data.json's shape); the relay runs it every 15 minutes (`CITY_SCAN_EVERY`), `scripts/collect.mjs` runs it once from the command line. `collector/public.mjs` is the public guard the relay applies to every snapshot it serves.
-   - `github.mjs` uses the GitHub API with `GITHUB_TOKEN`.
+1. `collector/scan.mjs` scans the org into a snapshot (data.json's shape); the relay runs it every hour (`CITY_SCAN_EVERY`, minutes), `scripts/collect.mjs` runs it once from the command line. `collector/public.mjs` is the public guard the relay applies to every snapshot it serves.
+   - `github.mjs` uses the GitHub API with `GITHUB_TOKEN`. Forks and mirrors (GitHub's flags, or `config.layout.mirrors`) are read for their metadata alone, never their commits, branches or contributors: they stand at the base of the scale, unlit. The org's own repositories' commit counts and branches come in small batches (`DETAILS`), since GitHub times out a query past 10 seconds; a repository it cannot count keeps its last count (`scan.mjs`).
    - `git.mjs` reads local bare clones.
    - `basecamp.mjs` reads Basecamp when `config.basecamp.account` and `BASECAMP_TOKEN` are set: projects, people, to-do lists and hill charts, card tables, message subjects, check-ins and files, and the progress report (never bodies, comments or chat).
    - `aggregate.mjs` turns the sources into data schema 3 (plus `wards` with Basecamp).

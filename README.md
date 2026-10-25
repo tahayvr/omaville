@@ -2,7 +2,7 @@
 
 The [omacom](https://github.com/omacom) GitHub org drawn as a living city on the Omarchy mark: who is working on what, which projects are moving, and what just shipped.
 
-One SvelteKit app. Inside its server, the relay scans the org every 15 minutes, takes GitHub and Basecamp webhooks into an event log, and keeps the log, the city's snapshot and layout, and sign-in's sessions in Postgres (Drizzle); the page draws the city from them and redraws in place whatever each new event changes. New repositories claim land and rise out of scaffolding. Nothing that already stands moves. Members of the org sign in (GitHub or Basecamp) to see the members' city: private repositories, teams and the Basecamp projects as wards.
+One SvelteKit app. Inside its server, the relay scans the org every hour, takes GitHub and Basecamp webhooks into an event log, and keeps the log, the city's snapshot and layout, and sign-in's sessions in Postgres (Drizzle); the page draws the city from them and redraws in place whatever each new event changes. New repositories claim land and rise out of scaffolding. Nothing that already stands moves. Members of the org sign in (GitHub or Basecamp) to see the members' city: private repositories, teams and the Basecamp projects as wards.
 
 The city opens in 3D (three.js) with free orbit: drag to turn, right-drag or two fingers to pan, scroll or pinch to zoom, Q / E to turn 45°. Without WebGL, or with `?view=2d`, it falls back to the flat isometric drawing. The toolbar button switches between them and remembers the choice.
 
@@ -51,7 +51,7 @@ The city reads `GITHUB_TOKEN` as a fixed token. A GitHub App's installation toke
 The app ships as one container: the [Dockerfile](Dockerfile) (Coolify, or any Docker host). In Coolify:
 
 1. Add a Postgres resource, and an application from this repository built with the Dockerfile, on port 3000. Health check: `/status`.
-2. Set the application's environment from [.env.example](.env.example). The public city needs only `DATABASE_URL` (the Postgres resource's URL), `ORIGIN` (the city's address), `GITHUB_TOKEN` (a public-repositories token, see Token) and `CITY_SNAPSHOT_TOKEN`. Migrations apply as the app starts, the first scan runs at once and then every 15 minutes, and each changed building redraws in place on open pages.
+2. Set the application's environment from [.env.example](.env.example). The public city needs only `DATABASE_URL` (the Postgres resource's URL), `ORIGIN` (the city's address), `GITHUB_TOKEN` (a public-repositories token, see Token) and `CITY_SNAPSHOT_TOKEN`. Migrations apply as the app starts, the first scan runs at once and then every hour (`CITY_SCAN_EVERY`, in minutes), and each changed building redraws in place on open pages.
 3. Optional, live within seconds: an org webhook (an org owner adds it) at `https://<domain>/hook`, JSON, with `CITY_WEBHOOK_SECRET` set to its secret; events: push, pull requests, releases, workflow runs, issues, repositories, organization. Without the secret, hooks are refused and the scans alone keep the city current.
 4. Optional, once: `POST /backfill` with `Authorization: Bearer $CITY_SNAPSHOT_TOKEN` reads the org's whole history for the replay and the year film.
 

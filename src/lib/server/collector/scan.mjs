@@ -19,7 +19,7 @@ export async function scan({ config, token = "", source = token ? "github" : "gi
   const since = now - (config.window ?? 30) * 86400, org = config.org;
   const json = (p) => JSON.parse(readFileSync(p, "utf8"));
   const input = source === "github"
-    ? await fromGithub({ org, token, now, since, hints: config.hints, publicOnly, patrons: config.patrons, mirrors: config.mirrors ?? [], log })
+    ? await fromGithub({ org, token, now, since, hints: config.hints, publicOnly, patrons: config.patrons, mirrors: config.layout?.mirrors ?? config.mirrors ?? [], log }) // the mirrors are named in the layout section
     : fromGit({ dir: clones, now, since, meta: meta ? json(meta) : {}, members: members ? json(members) : [], patrons: config.patrons });
   // Basecamp (the wards and the people's work) when the city's account is configured: config.basecamp.account and
   // BASECAMP_TOKEN; a failed read leaves the wards out of this scan, never the city
@@ -28,6 +28,9 @@ export async function scan({ config, token = "", source = token ? "github" : "gi
     try { input.basecamp = await fromBasecamp({ account: config.basecamp.account, token: bcToken, now, since, log }); }
     catch (e) { log(`basecamp skipped: ${e.message.slice(0, 160)}`); }
   }
+  // a repository GitHub could not count this time keeps its last count, so a building never drops for one bad read
+  const last = (n) => (projection === "both" ? prev?.members ?? prev?.public : prev)?.repos?.[n]?.total;
+  for (const r of input.repos ?? []) if (r.total == null) { r.total = last(r.name) ?? 0; log(`${r.name}: no count this time, kept ${r.total}`); }
   const seen = [];
   const full = aggregate(input, config, { seen });
   const finish = (data, p) => {

@@ -1233,7 +1233,7 @@ function tankNow(x, y) {
   return { svg: out.join(""), fp: { x0: x, x1: x + 22, y0: y, y1: y + 22 }, h: 26 };
 }
 // the relay's water tower (observability, not the org's data): the water is the snapshot's freshness, full while
-// the last scan is under 15 minutes old and empty at two hours; the lamp is the live stream, steady while it is
+// full while the last scan is within one scan interval (an hour by default) and empty two intervals later; the lamp is the live stream, steady while it is
 // connected, pulsing while it reconnects, dark without a relay. The page sets data.health and redraws this station.
 function waterTower(...a) { return withMaterial("steel", () => waterTowerNow(...a)); } // steel, in the light theme's colour
 function waterTowerNow(x, y) {
@@ -1323,7 +1323,7 @@ for (let i = 3; i <= 11; i++) {
   if (i % 4 === 0) { const t = cooler(X(i) + 22, Y(3) + 22, 14, 34 + (i % 3) * 6); onGround({ x0: X(i) + 8, x1: X(i) + 36, y0: Y(3) + 8, y1: Y(3) + 36 }, t.top, t.svg); continue; }
   if (i === 6) { // the relay's water tower stands in the service yard, where a tank stood
     CELL = null; drawing("relay", () => { const w = waterTower(X(i) + 8, Y(3) + 10); onGround(w.fp, w.h, `<g data-station="relay">${w.svg}</g>`); });
-    station("relay", { kind: "Water tower", title: "The relay", what: "The city's own health, not the org's: the water is how fresh the snapshot is (full under 15 minutes since the last scan, empty at two hours), the lamp is the live stream (steady when connected, pulsing while it reconnects, dark without a relay)." });
+    station("relay", { kind: "Water tower", title: "The relay", what: "The city's own health, not the org's: the water is how fresh the snapshot is (full within one scan interval of the last scan, an hour by default, and empty two intervals later), the lamp is the live stream (steady when connected, pulsing while it reconnects, dark without a relay)." });
     continue;
   }
   const a = (i % 3 === 0 ? tank : crateStack)(X(i) + 8, Y(3) + 14);

@@ -96,7 +96,7 @@ export function aggregate(input, config = {}, { seen = null } = {}) {
       desc: r.desc || "", lang: r.lang || "",
       flag, ...(r.private ? { private: true } : {}),
       created: r.created || 0,
-      total: flag === "mirror" ? 0 : Math.max(0, (r.total || 0) - (flag === "fork" ? 0 : botMade.get(r.name) || 0)), // lifetime commits by people: height (a mirror carries none of the org's work; a fork counts only what is ahead)
+      total: flag === "mirror" ? 0 : Math.max(0, (r.total || 0) - (flag === "fork" ? 0 : botMade.get(r.name) || 0)), // lifetime commits by people: height (a mirror carries none of the org's work; a fork, what the source counted ahead: none from the GitHub API, which reads upstreams for their metadata alone)
       c30: mine.length, c7: week.length, // recent work: light and motion
       unmerged, people: new Set(mine.map((c) => c.who)).size, people7: new Set(week.map((c) => c.who)).size,
       top: count(mine, (c) => c.who).slice(0, 8), pr: r.pr || 0, ...(r.releases ? { releases: r.releases } : {}), last,

@@ -38,11 +38,15 @@ export function client(token, { log = () => {} } = {}) {
 export const projectHint = (text) => { const m = (text ?? "").match(/^\s*project:\s*["']?(\d+)["']?\s*$/m); return m ? m[1] : undefined; };
 const REPOS = (hints) => `query($org:String!,$after:String){organization(login:$org){repositories(first:50,after:$after,orderBy:{field:PUSHED_AT,direction:DESC}){pageInfo{hasNextPage endCursor}nodes{
   name description isArchived isFork isMirror isPrivate createdAt pushedAt primaryLanguage{name}
-  defaultBranchRef{name target{...on Commit{history{totalCount}}}} parent{nameWithOwner defaultBranchRef{name}}
+  defaultBranchRef{name}
   pullRequests(states:OPEN){totalCount}
   hint:object(expression:"HEAD:${hints.replace(/[^\w./-]/g, "")}"){...on Blob{text}}
-  releases{totalCount}
-  refs(refPrefix:"refs/heads/",first:100,orderBy:{field:TAG_COMMIT_DATE,direction:DESC}){nodes{name target{...on Commit{committedDate}}}}}}}}`;
+  releases{totalCount}}}}}`;
+// The org's own repositories' details, a few to a query: lifetime commits on the default branch and the branches most
+// recently committed to. Never asked for a fork or a mirror: their history is upstream's, and counting a kernel
+// fork's million commits alone takes GitHub past its 10-second limit (a 502).
+const DETAILS = (names) => `query($org:String!){${names.map((n, i) => `r${i}:repository(owner:$org,name:${JSON.stringify(n)}){defaultBranchRef{target{...on Commit{history{totalCount}}}} refs(refPrefix:"refs/heads/",first:100,orderBy:{field:TAG_COMMIT_DATE,direction:DESC}){nodes{name target{...on Commit{committedDate}}}}}`).join(" ")}}`;
+const DETAIL_BATCH = 8;
 const TEAMS = `query($org:String!,$after:String){organization(login:$org){teams(first:50,after:$after){pageInfo{hasNextPage endCursor}nodes{name members(first:100){nodes{login}}}}}}`;
 const MEMBERS = `query($org:String!,$after:String){organization(login:$org){membersWithRole(first:100,after:$after){pageInfo{hasNextPage endCursor}nodes{login name}}}}`;
 const HISTORY = `query($owner:String!,$name:String!,$since:GitTimestamp!,$after:String){repository(owner:$owner,name:$name){defaultBranchRef{target{...on Commit{
@@ -109,22 +113,28 @@ export async function fromGithub({ org, token, now, since, hints = ".city.yml", 
   }
   log(`members: ${members.length}`);
   const list = (await pages(async (after) => (await gh.graphql(REPOS(hints), { org, after })).organization.repositories)).filter((r) => !(publicOnly && r.isPrivate));
-  log(`repos: ${list.length}`);
+  // forks and mirrors (config.layout.mirrors, or GitHub's flags) are upstream's work: their name, description and flags
+  // are read, never their commits, branches or contributors, so they stand at the base of the one scale, unlit
+  const mirrorSet = new Set(mirrors), upstream = (r) => r.isFork || r.isMirror || mirrorSet.has(r.name);
+  const own = list.filter((r) => !upstream(r) && r.defaultBranchRef), details = new Map();
+  log(`repos: ${list.length}, ${list.length - own.length} forks and mirrors read for their metadata alone`);
+  const detailsOf = async (names) => { const d = await gh.graphql(DETAILS(names), { org }); names.forEach((n, k) => d[`r${k}`] && details.set(n, d[`r${k}`])); };
+  for (let i = 0; i < own.length; i += DETAIL_BATCH) {
+    const batch = own.slice(i, i + DETAIL_BATCH).map((r) => r.name);
+    try { await detailsOf(batch); }
+    catch (e) { // one at a time, so one repository GitHub cannot count leaves only itself without details
+      log(`details in a batch failed (${e.message.slice(0, 80)}); one at a time`);
+      for (const n of batch) { try { await detailsOf([n]); } catch (e2) { log(`details skipped for ${n}: ${e2.message.slice(0, 120)}`); } }
+    }
+  }
   const sinceIso = new Date(since * 1000).toISOString();
-  const commits = [], branches = [], ahead = new Map(); // ahead: a fork's lifetime commits beyond its upstream
+  const commits = [], branches = [];
   await pool(list, 6, async (r) => {
     const def = r.defaultBranchRef?.name;
-    if (!def) return;
+    if (!def || upstream(r)) return;
     const recent = Date.parse(r.pushedAt) / 1000 >= since;
-    // landed work: the default branch since the window opened; for forks, only what is ahead of upstream
-    if (r.isFork && r.parent?.defaultBranchRef) {
-      try {
-        const [po] = r.parent.nameWithOwner.split("/");
-        const cmp = await gh.rest(`/repos/${org}/${r.name}/compare/${encodeURIComponent(`${po}:${r.parent.defaultBranchRef.name}`)}...${encodeURIComponent(def)}?per_page=250`);
-        ahead.set(r.name, cmp.ahead_by ?? 0);
-        if (recent) for (const c of cmp.commits ?? []) { const x = fromRest(r.name, c, true); if (x.at > since) commits.push(x); }
-      } catch (e) { log(`fork compare skipped for ${r.name}: ${e.message.slice(0, 120)}`); }
-    } else if (recent) {
+    // landed work: the default branch since the window opened
+    if (recent) {
       const nodes = await pages(async (after) => {
         const t = (await gh.graphql(HISTORY, { owner: org, name: r.name, since: sinceIso, after })).repository.defaultBranchRef?.target;
         return t?.history ?? { nodes: [], pageInfo: { hasNextPage: false } };
@@ -137,7 +147,7 @@ export async function fromGithub({ org, token, now, since, hints = ".city.yml", 
     }
     if (!recent) return;
     // work still on branches: compare each recently updated branch with the default branch
-    const recentRefs = (r.refs?.nodes ?? []).filter((b) => b.name !== def && Date.parse(b.target?.committedDate) / 1000 > since).slice(0, maxBranches);
+    const recentRefs = (details.get(r.name)?.refs?.nodes ?? []).filter((b) => b.name !== def && Date.parse(b.target?.committedDate) / 1000 > since).slice(0, maxBranches);
     for (const b of recentRefs) {
       try {
         const cmp = await gh.rest(`/repos/${org}/${r.name}/compare/${encodeURIComponent(def)}...${encodeURIComponent(b.name)}?per_page=100`);
@@ -156,8 +166,8 @@ export async function fromGithub({ org, token, now, since, hints = ".city.yml", 
   const repos = list.map((r) => ({
     name: r.name, desc: r.description ?? "", lang: r.primaryLanguage?.name ?? "", archived: r.isArchived, fork: r.isFork, mirror: r.isMirror, private: r.isPrivate,
     created: Math.floor(Date.parse(r.createdAt) / 1000), pushed: Math.floor(Date.parse(r.pushedAt) / 1000), pr: r.pullRequests.totalCount, releases: r.releases?.totalCount ?? 0, project: projectHint(r.hint?.text),
-    // lifetime commits, what a building's height follows: the default branch, or for a fork only what is ahead of upstream; mirrors carry none of the org's work
-    total: r.isMirror ? 0 : r.isFork ? (ahead.get(r.name) ?? 0) : r.defaultBranchRef?.target?.history?.totalCount ?? 0,
+    // lifetime commits, what a building's height follows: the default branch of the org's own repositories; forks and mirrors carry none of the org's work here
+    total: upstream(r) ? 0 : details.get(r.name)?.defaultBranchRef?.target?.history?.totalCount ?? null, // null: GitHub could not count it this time (scan.mjs keeps the last count)
   }));
   // the org's teams on GitHub, for the members' city: [{ name, members: [login] }] (needs a token that reads the org)
   let teams = [];
@@ -177,8 +187,8 @@ export async function fromGithub({ org, token, now, since, hints = ".city.yml", 
   catch (e) { log(`public members skipped: ${e.message.slice(0, 120)}`); }
   // lifetime contributors per public repository (forks and mirrors carry upstream's authors, so they are skipped):
   // one house per person in the contributors' quarter
-  const contributors = [], mirrorSet = new Set(mirrors);
-  await pool(list.filter((r) => !r.isPrivate && !r.isFork && !r.isMirror && !mirrorSet.has(r.name)), 6, async (r) => {
+  const contributors = [];
+  await pool(list.filter((r) => !r.isPrivate && !upstream(r)), 6, async (r) => {
     try {
       for (let page = 1; page <= 10; page++) {
         const p = await gh.rest(`/repos/${org}/${r.name}/contributors?per_page=100&page=${page}`);
