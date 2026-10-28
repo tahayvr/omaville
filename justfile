@@ -1,3 +1,6 @@
+alias c := check
+alias d := dev
+
 data := "dev/snapshot.json"
 
 # list the recipes
