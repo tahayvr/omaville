@@ -130,9 +130,8 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--ow-page)}
 
 /* dock */
 .ow-dock{position:absolute;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:end;gap:12px;pointer-events:none}
-.ow-dock>.ow-days,.ow-dock>.ow-restore-days{grid-column:2;grid-row:1;justify-self:center}
+.ow-dock>.ow-days,.ow-dock>.ow-restore-days{grid-column:1/3;grid-row:1;justify-self:start}
 .ow-dock>.ow-tools{grid-column:3;grid-row:1;justify-self:end}
-.ow-dock[data-fit="left"]>.ow-days,.ow-dock[data-fit="left"]>.ow-restore-days{grid-column:1/3;justify-self:start}
 .ow-dock[data-fit="none"]>.ow-days,.ow-dock[data-fit="none"]>.ow-restore-days{display:none}
 .ow-dock>*{pointer-events:auto;position:relative}
 .ow-days{width:560px;max-width:100%;padding:8px 12px 6px}
@@ -229,13 +228,13 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--ow-page)}
 .ow-auth a{color:inherit;text-decoration:none;border-bottom:1px solid var(--ow-ring)}.ow-auth a:hover{color:var(--ow-accent);border-color:var(--ow-accent)}
 .ow-auth b{font-weight:600;color:var(--ow-accent)}
 /* the scrubber: takes the days card's place while it is open */
-.ow-dock>.ow-replay{grid-column:2;grid-row:1;justify-self:center;width:560px;max-width:100%;padding:0 0 8px;pointer-events:auto}
+.ow-dock>.ow-replay{grid-column:1/3;grid-row:1;justify-self:start;width:560px;max-width:100%;padding:0 0 8px;pointer-events:auto}
 .ow-replay .ow-rp-row,.ow-replay .ow-rp-note{padding:0 12px}
 .ow-replay .ow-card-head{display:flex;justify-content:space-between;align-items:center}
 .ow-replay .ow-eyebrow b{color:var(--anatomy-strong);font-weight:500}
 .ow-rp-row{display:flex;align-items:center;gap:10px;margin:6px 0 4px}
 .ow-rp-note{font-size:11px;color:var(--anatomy-muted)}
-.ow-dock[data-fit="left"]>.ow-replay{grid-column:1/3;justify-self:start}.ow-dock[data-fit="none"]>.ow-replay{grid-column:1/3;grid-row:2;justify-self:stretch;width:auto!important}
+.ow-dock[data-fit="none"]>.ow-replay{grid-column:1/3;grid-row:2;justify-self:stretch;width:auto!important}
 /* the clip button: a dot that turns live while recording, with the seconds left */
 #ow-clip svg circle{fill:none;stroke:currentColor}#ow-clip[aria-busy="true"]{color:var(--ow-live)}#ow-clip[aria-busy="true"] svg circle{fill:currentColor}
 .ow-clip-n{position:absolute;right:2px;bottom:1px;font:500 8px/1 var(--anatomy-mono);font-style:normal}.ow-btn{position:relative}

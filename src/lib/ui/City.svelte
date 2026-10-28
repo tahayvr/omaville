@@ -133,7 +133,7 @@
     }
   }
 
-  // ---- keep the chrome from overlapping: drop totals that don't fit, park the timeline where it fits ----
+  // ---- keep the chrome from overlapping: drop totals that don't fit, the timeline bottom left while it fits ----
   function fitChrome() {
     if (!bar || !dockEl || !toolsEl) return;
     ui.narrow = stage.clientWidth < 860;
@@ -141,9 +141,9 @@
     cells.forEach((c) => c.removeAttribute("data-off"));
     const tight = () => bar.scrollWidth > bar.clientWidth + 1 || (!wrapped && bar.querySelector(".ow-search").getBoundingClientRect().width < 250) || brand.scrollWidth > brand.clientWidth + 1 || (wrapped && wrap.getBoundingClientRect().top > brand.getBoundingClientRect().top + 4);
     for (let n = cells.length - 1; n > 0 && tight(); n--) cells[n].setAttribute("data-off", "");
-    const W = dockEl.clientWidth, tw = toolsEl.offsetWidth, gap = 12, centre = W - 2 * (tw + gap), left = W - tw - gap;
-    dockEl.dataset.fit = centre >= 300 ? "center" : left >= 260 ? "left" : "none";
-    const dw = Math.min(560, dockEl.dataset.fit === "center" ? centre : left) + "px";
+    const left = dockEl.clientWidth - toolsEl.offsetWidth - 12;
+    dockEl.dataset.fit = left >= 260 ? "left" : "none";
+    const dw = Math.min(560, left) + "px";
     if (daysEl) daysEl.style.width = dw;
     if (replayEl) replayEl.style.width = dw; // the scrubber takes the days card's place
     // cards sit between the header and the dock, whatever their heights are now
