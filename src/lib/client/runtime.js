@@ -7,18 +7,28 @@ import { stationsFor } from "../city/stations.js";
 import { merge } from "./model.js";
 
 const POLL = 120 * 1000; // how often to look for a new snapshot without the stream
+const SILENT = 60 * 1000; // a worker that has not answered a build in this long is given up for the main thread
 const IDLE = 90 * 1000; // apply a new plan on its own after this long without input
 
 // ---- a builder that prefers a worker and falls back to the main thread ----
 // build(data?, ids?, layout?): the city's two 3D records prepared into geometry (client/worker.js), the whole city or
-// (with ids) only those stations, drawn with new data
+// (with ids) only those stations, drawn with new data. A worker that fails, sends what cannot be read, or goes silent
+// (killed for memory) is dropped and its builds run on the main thread, so the plate never waits forever.
 function makeBuilder(input) {
   let worker = null, seq = 0;
   const waiting = new Map();
+  const abandon = (why) => {
+    if (!worker) return;
+    console.warn(`city: the builder worker ${why}; drawing on the main thread`);
+    worker.terminate(); worker = null;
+    for (const [, w] of waiting) { clearTimeout(w.timer); w.retry(); }
+    waiting.clear();
+  };
   try {
     worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
-    worker.onmessage = (e) => { const w = waiting.get(e.data.id); if (!w) return; waiting.delete(e.data.id); e.data.ok ? w.ok(e.data.city) : w.fail(new Error(e.data.error)); };
-    worker.onerror = () => { worker = null; for (const [, w] of waiting) w.retry(); waiting.clear(); };
+    worker.onmessage = (e) => { const w = waiting.get(e.data.id); if (!w) return; waiting.delete(e.data.id); clearTimeout(w.timer); e.data.ok ? w.ok(e.data.city) : w.fail(new Error(e.data.error)); };
+    worker.onerror = () => abandon("failed");
+    worker.onmessageerror = () => abandon("sent a message that could not be read");
     worker.postMessage({ type: "data", ...input });
   } catch { worker = null; }
   const local = async (ids) => { const { three } = await import("./worker.js"); return three(input, ids); };
@@ -26,7 +36,7 @@ function makeBuilder(input) {
     if (data) input.data = data; if (layout) input.layout = layout;
     if (!worker) return local(ids).then(ok, fail);
     const id = ++seq;
-    waiting.set(id, { ok, fail, retry: () => local(ids).then(ok, fail) });
+    waiting.set(id, { ok, fail, retry: () => local(ids).then(ok, fail), timer: setTimeout(() => abandon(`did not answer in ${SILENT / 1000}s`), SILENT) });
     worker.postMessage({ type: "three", id, data, layout, ids });
   });
 }
