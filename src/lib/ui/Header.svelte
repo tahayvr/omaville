@@ -1,4 +1,4 @@
-<!-- The header: the plate's title and who is signed in, the search, and the org's totals. -->
+<!-- The header: the plate's title, the way to the board, who is signed in, the search, and the org's totals. -->
 <script>
   import Search from "./Search.svelte";
   import Icon from "./Icon.svelte";
@@ -18,6 +18,10 @@
 <header class="ow-bar" bind:this={bar}>
   <div class="ow-brand">
     <span class="ow-fig">Fig 1</span><b>{name}</b><span class="ow-sub">github.com/{org} · {days} days, live</span>
+    <nav class="ob-views ob-views-city" aria-label="Views">
+      <Button variant="default" size="xs" href="/" aria-current="page">City</Button>
+      <Button variant="outline" size="xs" href="/board">Board</Button>
+    </nav>
     {#if ui.me?.who}<span class="ow-auth"><b>members' city</b> · {ui.me.who}{#if !ui.me.dev} · <Button variant="link" size="xs" class="ow-signin" onclick={() => import("../client/auth.js").then((a) => a.signOut())}>sign out</Button>{/if}</span>
     {:else if ui.me?.providers?.length}<span class="ow-auth">public city · sign in with {#each ui.me.providers as p, i}{i ? " or " : ""}<Button variant="link" size="xs" class="ow-signin" onclick={() => import("../client/auth.js").then((a) => a.signIn(p))}>{p === "github" ? "GitHub" : "Basecamp"}</Button>{/each}</span>{/if}
   </div>

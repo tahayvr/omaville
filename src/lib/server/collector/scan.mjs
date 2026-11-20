@@ -10,7 +10,7 @@ import { fromGithub } from "./github.mjs";
 import { fromGit } from "./git.mjs";
 import { fromBasecamp } from "./basecamp.mjs";
 
-export const digestOf = (data) => createHash("sha1").update(JSON.stringify({ repos: data.repos, people: data.people, days: data.days, modules: data.modules, contributors: data.contributors, patrons: data.patrons, wards: data.wards })).digest("hex").slice(0, 16);
+export const digestOf = (data) => createHash("sha1").update(JSON.stringify({ repos: data.repos, people: data.people, days: data.days, modules: data.modules, contributors: data.contributors, patrons: data.patrons, wards: data.wards, work: data.work })).digest("hex").slice(0, 16);
 
 // projection: "public" (default), "members", or "both" ({ public, members, seen } from one read of the org; prev is
 // then { public, members } too; seen: the landed commits, for the relay's log). publicOnly: no private repository

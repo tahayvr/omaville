@@ -9,7 +9,8 @@
  "bots": "\\[bot\\]|-bot$|clawbot$|^Omabot$|^Claude$|^github-actions$|^copilot",
  "routine": {
   "who": "github-actions|dependabot|omarchy-themes-bot|akbash-bot|kangal-bot|copilot|renovate|^omabot$|^omarchy ?bot$|^claude$",
-  "subject": "^chore: (sync|rebuild)|^Track upstream branches|^Refresh the (data|guest package lock)|^Translate published site content|^Bump \\S+ from "
+  "subject": "^chore: (sync|rebuild)|^Track upstream branches|^Refresh the (data|guest package lock)|^Translate published site content|^Bump \\S+ from ",
+  "pulls": "^Sync upstream|^Rebuild against"
  },
  "people": {
   "who": "all",

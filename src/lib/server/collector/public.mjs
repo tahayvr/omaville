@@ -32,6 +32,11 @@ export function publicProblems(data) {
   const names = new Set(Object.keys(data.repos));
   for (const p of data.people) for (const [r] of p.repos) if (!names.has(r)) problems.push(`${p.n} refers to a hidden repository ${r}`);
   for (const d of data.days) for (const [r] of d.repos) if (!names.has(r)) problems.push(`a day refers to a hidden repository ${r}`);
+  if (data.workPublic) problems.push("workPublic left in");
+  for (const [k, w] of Object.entries(data.work ?? {})) {
+    for (const n of Object.keys(w.repos ?? {})) if (!names.has(n)) problems.push(`the board's ${k} refers to a hidden repository ${n}`);
+    for (const p of w.list ?? []) for (const r of [...p.r, ...p.M, ...p.O].map((x) => x[0])) if (!names.has(r)) problems.push(`the board's ${k}: ${p.n} refers to a hidden repository ${r}`);
+  }
   for (const c of data.contributors ?? []) for (const [r] of c.repos) if (!names.has(r)) problems.push(`contributor ${c.login} refers to a hidden repository ${r}`);
   return problems;
 }

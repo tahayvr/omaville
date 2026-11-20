@@ -7,6 +7,8 @@
 //   repos:    [{ name, desc, lang, archived, fork, mirror, private, created, pushed, pr, total }],
 //   commits:  [{ repo, sha, at, login, name, email, subject, merge, landed, pid? }],  // pid: a change id (git source)
 //   branches: [{ repo, name, at, ahead, authors: [[who, n]] }],
+//   pulls?:    [{ repo, number, title, login, at, state: "merged" | "open" }],  // merged in the window, or opened in it and still open
+//   releases?: [{ repo, tag, at }],               // published in the window
 //   contributors: [{ repo, login, n, bot? }],     // lifetime commits per person (and per bot) per public repository
 //   basecamp?: { projects, people, events },      // collector/basecamp.mjs: the wards and the people's work
 // }
@@ -144,6 +146,45 @@ export function aggregate(input, config = {}, { seen = null } = {}) {
     };
   }).sort((a, b) => b.c30 + (b.w30 ?? 0) - a.c30 - (a.w30 ?? 0) || b.c7 - a.c7 || a.n.localeCompare(b.n));
 
+  // ---- work: the board's view (lib/board), what landed, merged, shipped and waits, per repository and per person ----
+  // Two spans, the belts' week and the whole window, each of whole UTC days. Commits are the ones that landed on a
+  // default branch. Pull requests by bots are left out; routine ones (config.routine: the commits' subjects, and
+  // `pulls` for titles) are counted, never listed. Hidden people are counted, never named. repoOk picks the
+  // repositories (all for the members' city, the public ones for the public city).
+  const routinePull = new RegExp(config.routine?.pulls ?? "(?!)", "i");
+  const hiddenNames = new Set([...list.values()].filter((m) => !shown(m)).map((m) => m.name));
+  const author = (login) => who({ login, name: login });
+  const isBotName = (w) => bot.test(w) || routineWho.test(w);
+  const pullsIn = (input.pulls ?? []).filter((p) => repoMeta.has(p.repo) && !mirrors.has(p.repo) && !isBotName(p.login || "")).map((p) => ({ ...p, who: author(p.login || "unknown"), routine: routineSubject.test(p.title) || routinePull.test(p.title) }));
+  const releasesIn = (input.releases ?? []).filter((x) => repoMeta.has(x.repo) && !mirrors.has(x.repo));
+  const workOf = (span, repoOk) => {
+    const from = start + (window - span) * DAY, at = (x) => x.at >= from && x.at <= now && repoOk(x.repo);
+    const cs = recent.filter((c) => c.landed && at(c)), ps = pullsIn.filter(at), rs = releasesIn.filter(at);
+    const daily = (l) => { const d = new Array(span).fill(0); for (const c of l) d[Math.min(span - 1, Math.max(0, Math.floor((c.at - from) / DAY)))]++; return d; };
+    const named = (l) => l.filter((x) => !hiddenNames.has(x.who));
+    const repos = {};
+    for (const n of new Set([...cs, ...ps, ...rs].map((x) => x.repo))) {
+      const c = cs.filter((x) => x.repo === n), m = ps.filter((x) => x.repo === n && x.state === "merged"), o = ps.filter((x) => x.repo === n && x.state === "open"), r = newest(rs.filter((x) => x.repo === n));
+      const rt = m.filter((x) => x.routine).length;
+      repos[n] = {
+        c: c.length, p: new Set(c.map((x) => x.who)).size, m: m.length, o: o.length, rl: r.length, ...(rt ? { rt } : {}), d: daily(c),
+        top: count(named(c), (x) => x.who).slice(0, 5),
+        R: r.slice(0, 3).map((x) => [x.tag, x.at]), ...(r.length > 1 ? { r0: r[r.length - 1].tag } : {}),
+        M: newest(named(m.filter((x) => !x.routine))).slice(0, 5).map((x) => [x.number, x.title.slice(0, 100), x.who, x.at]),
+        O: newest(named(o.filter((x) => !x.routine))).slice(0, 5).map((x) => [x.number, x.title.slice(0, 100), x.who, x.at]),
+      };
+    }
+    const people = [...new Set(cs.map((x) => x.who))].filter((n) => !hiddenNames.has(n)).map((n) => { // the people who landed commits: the board's rows and strings
+      const c = cs.filter((x) => x.who === n), m = ps.filter((x) => x.who === n && x.state === "merged"), o = ps.filter((x) => x.who === n && x.state === "open");
+      const mine = (l) => newest(l.filter((x) => !x.routine)).slice(0, 3).map((x) => [x.repo, x.number, x.title.slice(0, 100), x.at]);
+      return { n, c: c.length, m: m.length, o: o.length, d: daily(c), r: count(c, (x) => x.repo), M: mine(m), O: mine(o) };
+    }).sort((a, b) => b.c - a.c || b.m - a.m || a.n.localeCompare(b.n));
+    const merged = ps.filter((x) => x.state === "merged");
+    return { days: span, from, d: daily(cs), commits: cs.length, people: new Set(cs.map((x) => x.who)).size, merged: merged.length, routine: merged.filter((x) => x.routine).length, opened: ps.length - merged.length, releases: rs.length, repos, list: people };
+  };
+  const works = (repoOk) => ({ week: workOf(Math.min(7, window), repoOk), window: workOf(window, repoOk) });
+  const hasWork = !!(input.pulls || input.releases); // a source without pull requests (local clones) draws no board
+
   // ---- days ----
   const days = Array.from({ length: window }, (_, i) => {
     const list = recent.filter((c) => dayOf(c.at) === i);
@@ -177,6 +218,7 @@ export function aggregate(input, config = {}, { seen = null } = {}) {
     window: { days: window, from: since, to: now },
     repos, people, days, contributors, patrons, ...(bc ? { wards: wardsOf(bc, { now, config, hints: Object.fromEntries(input.repos.filter((r) => r.project).map((r) => [r.name, r.project])) }) } : {}),
     publicMembers: input.publicMembers ?? [],
+    ...(hasWork ? { work: works(() => true), workPublic: works((n) => !repoMeta.get(n)?.private) } : {}), // project() keeps one of the two
     modules: [{ id: "retired", repos: Object.entries(repos).filter(([, r]) => r.flag === "archived").map(([n]) => n) }],
     source: input.source ?? "",
   };
@@ -186,7 +228,7 @@ export function aggregate(input, config = {}, { seen = null } = {}) {
 // GitHub login (a committer with no login keeps the name they committed under, which is already public in git),
 // teams and the roster are gone, and membership is marked only for public members.
 export function project(data, mode = "public") {
-  if (mode !== "public") return { ...data, projection: "members" };
+  if (mode !== "public") { const out = { ...data, projection: "members" }; delete out.workPublic; return out; }
   const hidden = new Set(Object.entries(data.repos).filter(([, r]) => r.private).map(([n]) => n));
   const login = new Map(data.people.filter((p) => p.gh).map((p) => [p.n, p.gh]));
   const who = (n) => login.get(n) ?? n;
@@ -206,7 +248,12 @@ export function project(data, mode = "public") {
   const modules = data.modules.map((m) => ({ ...m, repos: m.repos.filter((r) => !hidden.has(r)) }));
   // a ward stands dark in the public city: that it exists, and the public repositories linked to it
   const wards = data.wards ? Object.fromEntries(Object.entries(data.wards).map(([id, w]) => [id, { repos: (w.repos ?? []).filter((r) => !hidden.has(r)) }])) : undefined;
-  const out = { ...data, projection: "public", repos, people, days, contributors, modules, ...(wards ? { wards } : {}) };
-  delete out.publicMembers;
+  // the board's work, counted over the public repositories alone (workPublic), its people by login
+  const span = (w) => ({ ...w,
+    repos: Object.fromEntries(Object.entries(w.repos).map(([n, r]) => [n, { ...r, top: r.top.map(([p, c]) => [who(p), c]), M: r.M.map(([k, t, p, at]) => [k, t, who(p), at]), O: r.O.map(([k, t, p, at]) => [k, t, who(p), at]) }])),
+    list: w.list.map((p) => ({ ...p, n: who(p.n) })) });
+  const work = data.workPublic ? { week: span(data.workPublic.week), window: span(data.workPublic.window) } : undefined;
+  const out = { ...data, projection: "public", repos, people, days, contributors, modules, ...(wards ? { wards } : {}), ...(work ? { work } : {}) };
+  delete out.publicMembers; delete out.workPublic;
   return out;
 }

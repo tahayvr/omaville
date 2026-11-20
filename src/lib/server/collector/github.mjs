@@ -56,6 +56,12 @@ const LIST = `query($org:String!,$after:String){organization(login:$org){reposit
 const MERGED = `query($owner:String!,$name:String!,$after:String){repository(owner:$owner,name:$name){pullRequests(states:MERGED,first:100,after:$after,orderBy:{field:CREATED_AT,direction:ASC}){pageInfo{hasNextPage endCursor}nodes{number title mergedAt author{login}}}}}`;
 const RELEASES = `query($owner:String!,$name:String!,$after:String){repository(owner:$owner,name:$name){releases(first:100,after:$after){pageInfo{hasNextPage endCursor}nodes{databaseId tagName name publishedAt isDraft}}}}`;
 
+// The board's work items (lib/board): a repository's pull requests merged in the window (newest updates first, read
+// until one is older than the window), the ones opened in it and still open, and its latest releases.
+const PULLS_MERGED = `query($owner:String!,$name:String!,$after:String){repository(owner:$owner,name:$name){pullRequests(states:MERGED,first:100,after:$after,orderBy:{field:UPDATED_AT,direction:DESC}){pageInfo{hasNextPage endCursor}nodes{number title mergedAt updatedAt author{login}}}}}`;
+const PULLS_OPEN = `query($owner:String!,$name:String!,$after:String){repository(owner:$owner,name:$name){pullRequests(states:OPEN,first:100,after:$after,orderBy:{field:CREATED_AT,direction:DESC}){pageInfo{hasNextPage endCursor}nodes{number title createdAt isDraft author{login}}}}}`;
+const RELEASED = `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){releases(first:50,orderBy:{field:CREATED_AT,direction:DESC}){nodes{tagName publishedAt isDraft}}}}`;
+
 // The org's whole history, for the relay's log (Phase 4 backfill): every commit on each default branch (as
 // commit.seen, one per sha), every merged pull request and every release, with the same ids the webhooks use, so
 // a backfill and the live stream never count the same thing twice. Forks and mirrors are skipped: their history is
@@ -88,6 +94,11 @@ export async function historyOf({ org, token, publicOnly = false, isBot = () => 
 async function pages(fetchPage) {
   const out = [];
   for (let after = null; ;) { const { nodes, pageInfo } = await fetchPage(after); out.push(...nodes); if (!pageInfo.hasNextPage) return out; after = pageInfo.endCursor; }
+}
+// pages, newest first, read while the page's last node is still fresh (so a long history is never walked to its end)
+async function pagesWhile(fetchPage, fresh) {
+  const out = [];
+  for (let after = null; ;) { const { nodes, pageInfo } = await fetchPage(after); out.push(...nodes); if (!pageInfo.hasNextPage || !nodes.length || !fresh(nodes[nodes.length - 1])) return out; after = pageInfo.endCursor; }
 }
 async function pool(items, n, fn) {
   const out = new Array(items.length); let i = 0;
@@ -128,11 +139,24 @@ export async function fromGithub({ org, token, now, since, hints = ".city.yml", 
     }
   }
   const sinceIso = new Date(since * 1000).toISOString();
-  const commits = [], branches = [];
+  const commits = [], branches = [], pulls = [], releases = [];
+  const sec = (t) => Math.floor(Date.parse(t) / 1000);
   await pool(list, 6, async (r) => {
     const def = r.defaultBranchRef?.name;
     if (!def || upstream(r)) return;
     const recent = Date.parse(r.pushedAt) / 1000 >= since;
+    // the board's work items: what merged, what was opened and still waits, what shipped (never a draft)
+    if (recent) {
+      try {
+        const merged = await pagesWhile(async (after) => (await gh.graphql(PULLS_MERGED, { owner: org, name: r.name, after })).repository.pullRequests, (p) => sec(p.updatedAt) >= since);
+        for (const p of merged) if (p.mergedAt && sec(p.mergedAt) >= since) pulls.push({ repo: r.name, number: p.number, title: p.title || "", login: p.author?.login ?? "", at: sec(p.mergedAt), state: "merged" });
+        if (r.pullRequests.totalCount) {
+          const open = await pagesWhile(async (after) => (await gh.graphql(PULLS_OPEN, { owner: org, name: r.name, after })).repository.pullRequests, (p) => sec(p.createdAt) >= since);
+          for (const p of open) if (!p.isDraft && sec(p.createdAt) >= since) pulls.push({ repo: r.name, number: p.number, title: p.title || "", login: p.author?.login ?? "", at: sec(p.createdAt), state: "open" });
+        }
+        if (r.releases?.totalCount) for (const x of (await gh.graphql(RELEASED, { owner: org, name: r.name })).repository.releases.nodes) if (!x.isDraft && x.publishedAt && sec(x.publishedAt) >= since) releases.push({ repo: r.name, tag: x.tagName, at: sec(x.publishedAt) });
+      } catch (e) { log(`pull requests and releases skipped for ${r.name}: ${e.message.slice(0, 120)}`); }
+    }
     // landed work: the default branch since the window opened
     if (recent) {
       const nodes = await pages(async (after) => {
@@ -197,6 +221,7 @@ export async function fromGithub({ org, token, now, since, hints = ".city.yml", 
       }
     } catch (e) { log(`contributors skipped for ${r.name}: ${e.message.slice(0, 120)}`); }
   });
+  log(`pull requests: ${pulls.length}, releases: ${releases.length}`);
   log(`commits: ${commits.length}, branches: ${branches.length}, contributors: ${contributors.length} rows, public members: ${publicMembers.length}, rate left: ${gh.remaining()}`);
-  return { now, since, members, publicMembers, teams, patrons, repos, commits: commits.filter((c) => c.at <= now), branches, contributors, source: `github:${org}` };
+  return { now, since, members, publicMembers, teams, patrons, repos, commits: commits.filter((c) => c.at <= now), branches, pulls: pulls.filter((p) => p.at <= now), releases: releases.filter((x) => x.at <= now), contributors, source: `github:${org}` };
 }

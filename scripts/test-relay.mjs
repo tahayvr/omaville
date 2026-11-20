@@ -182,6 +182,38 @@ await t("a new snapshot refolds only what is newer than it", async () => {
   });
 }
 {
+  const { aggregate, project } = await import("../src/lib/server/collector/aggregate.mjs");
+  const { publicProblems } = await import("../src/lib/server/collector/public.mjs");
+  const { buildBoard, litBy } = await import("../src/lib/board/board.js");
+  await t("the board's work: landed commits, pull requests and releases per span, bots out, routine counted, private work only for members", async () => {
+    const now = Date.UTC(2026, 9, 18, 12) / 1000, D = 86400;
+    const c = (repo, sha, at, login, landed = true) => ({ repo, sha, at, login, name: login, email: `${login}@x`, subject: `work ${sha}`, merge: false, landed });
+    const full = aggregate({ now, since: now - 30 * D, members: [{ login: "ada", name: "Ada Coder" }], repos: [{ name: "r", total: 9, pr: 2, created: now - D }, { name: "p", total: 1, pr: 0, private: true }], branches: [], contributors: [],
+      commits: [c("r", "1", now - 3600, "ada"), c("r", "2", now - 2 * D, "zed"), c("r", "3", now - 20 * D, "zed"), c("r", "4", now - 3600, "ada", false), c("p", "5", now - 3600, "ada")],
+      pulls: [{ repo: "r", number: 7, title: "Add a thing", login: "zed", at: now - 3600, state: "merged" }, { repo: "r", number: 8, title: "Sync upstream (hourly): x 1-1", login: "ada", at: now - 7200, state: "merged" },
+        { repo: "r", number: 9, title: "Fix a thing", login: "ada", at: now - 2 * D, state: "open" }, { repo: "r", number: 10, title: "Bump", login: "dependabot[bot]", at: now - 3600, state: "merged" },
+        { repo: "p", number: 3, title: "A secret plan", login: "ada", at: now - 3600, state: "merged" }, { repo: "r", number: 2, title: "An old one", login: "zed", at: now - 20 * D, state: "merged" }],
+      releases: [{ repo: "r", tag: "v1.0", at: now - 5 * D }, { repo: "r", tag: "v1.1", at: now - D }, { repo: "p", tag: "v9", at: now - D }] },
+      { bots: "\\[bot\\]", people: { who: "all" }, routine: { pulls: "^Sync upstream" } });
+    const mem = project(full, "members"), pub = project(full, "public"), w = pub.work.week;
+    assert.ok(!("workPublic" in mem) && !("workPublic" in pub));
+    assert.deepEqual([w.commits, w.merged, w.routine, w.opened, w.releases], [2, 2, 1, 1, 2]); // the branch-only commit, the bot's pull request and the private repository are out
+    assert.deepEqual(Object.keys(w.repos), ["r"]);
+    assert.deepEqual(w.repos.r.M.map((x) => x[0]), [7]); assert.equal(w.repos.r.rt, 1); assert.equal(w.repos.r.r0, "v1.0"); assert.equal(w.repos.r.R[0][0], "v1.1");
+    assert.deepEqual(w.list.map((p) => [p.n, p.c]), [["ada", 1], ["zed", 1]]); // people by login in the public city
+    assert.deepEqual([pub.work.window.commits, pub.work.window.merged], [3, 3]);
+    assert.ok(!JSON.stringify(pub.work).includes("secret") && !JSON.stringify(pub.work).includes("Ada Coder"));
+    assert.deepEqual(publicProblems(pub), []);
+    assert.deepEqual(Object.keys(mem.work.week.repos).sort(), ["p", "r"]); assert.equal(mem.work.week.list[0].n, "Ada Coder"); assert.equal(mem.work.week.commits, 3);
+    const board = buildBoard(pub), again = buildBoard(pub);
+    assert.deepEqual(board, again); // same data, same board
+    assert.equal(board.repos[0].name, "r"); assert.equal(board.repos[0].isNew, true); assert.equal(board.links.length, 2);
+    assert.ok(!JSON.stringify(board).includes("NaN"));
+    const lit = litBy(board, "p:ada"); assert.ok(lit.has("r:r") && !lit.has("p:zed"));
+    assert.equal(buildBoard({ ...pub, work: undefined }), null);
+  });
+}
+{
   const { createWelcome } = await import("../src/lib/server/relay/welcome.mjs");
   const meta = new Map(), calls = [];
   const w = createWelcome({ env: { CITY_WELCOME: "1", CITY_PUBLIC_URL: "https://city.example/", CITY_COMMENT_TOKEN: "t" }, config: { org: "omacom" }, getMeta: (k) => meta.get(k), putMeta: (k, v) => meta.set(k, v), fetchImpl: async (url, init) => { calls.push([url, JSON.parse(init.body).body]); return { ok: true, status: 201 }; }, log: () => {} });
