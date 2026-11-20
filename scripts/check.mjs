@@ -27,7 +27,7 @@ for (const az of args.az ? [+args.az] : VIEWS) {
   // deterministic: the same data draws the same city, byte for byte
   if (buildCity({ data, layout, config, az }).svg !== city.svg) { console.log(`az ${az}: NOT DETERMINISTIC`); process.exitCode = 1; }
 }
-// every kind of station the city draws has a row in the legend (data-kind on a <dt> in src/lib/ui/Legend.svelte)
+// every kind of station the city draws has an entry in the legend (data-kind on an <article> in src/lib/ui/Legend.svelte)
 const html = readFileSync(new URL("../src/lib/ui/Legend.svelte", here), "utf8");
 const explained = new Set([...html.matchAll(/data-kind="([^"]+)"/g)].flatMap((m) => m[1].split(",").map((s) => s.trim())));
 // the org's own words join the Height row from the config (Legend.svelte: own)
